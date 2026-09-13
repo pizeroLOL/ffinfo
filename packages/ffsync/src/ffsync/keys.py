@@ -11,14 +11,13 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
 import json
 from dataclasses import dataclass
 from typing import Final, Self
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from ffsync._encoding import key_b64url
 from ffsync.crypto import EncryptedPayload, KeyBundle
 from ffsync.errors import DecryptionError, KeyDerivationError
 
@@ -40,11 +39,7 @@ class ScopedKey(BaseModel):
 
     def key_bytes(self) -> bytes:
         """``k`` 的原始字节。oldsync 的 scoped key 是 64 字节，就是 kSync。"""
-        try:
-            return base64.urlsafe_b64decode(self.k + "=" * (-len(self.k) % 4))
-        except (binascii.Error, ValueError) as exc:
-            msg = f"scoped key 的 k 不是合法的 base64url（scope={self.scope}）"
-            raise KeyDerivationError(msg) from exc
+        return key_b64url(self.k, f"scoped key 的 k（scope={self.scope}）")
 
     def to_key_bundle(self) -> KeyBundle:
         """切出同步用的 :class:`~ffsync.crypto.KeyBundle`。"""

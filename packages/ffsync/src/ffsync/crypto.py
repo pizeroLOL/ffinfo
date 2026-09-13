@@ -16,7 +16,6 @@
 from __future__ import annotations
 
 import base64
-import binascii
 import hashlib
 import hmac as hmac_lib
 import os
@@ -27,6 +26,7 @@ from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from ffsync._encoding import key_b64, key_b64url, record_b64, record_hex
 from ffsync.errors import ConfigurationError, DecryptionError, KeyDerivationError
 
 __all__ = ["EncryptedPayload", "KeyBundle"]
@@ -79,19 +79,14 @@ class KeyBundle:
     @classmethod
     def from_ksync_base64(cls, ksync: str) -> Self:
         """从 base64url（无填充）编码的 kSync 切出密钥对。"""
-        try:
-            decoded = base64.urlsafe_b64decode(ksync + "=" * (-len(ksync) % 4))
-        except (binascii.Error, ValueError) as exc:
-            msg = "kSync 不是合法的 base64url"
-            raise KeyDerivationError(msg) from exc
-        return cls.from_ksync_bytes(decoded)
+        return cls.from_ksync_bytes(key_b64url(ksync, "kSync"))
 
     @classmethod
     def from_base64(cls, encryption_key: str, hmac_key: str) -> Self:
         """从两个标准 base64 字符串（带填充）构造。"""
         return cls(
-            encryption_key=_decode_base64(encryption_key, "加密密钥", KeyDerivationError),
-            hmac_key=_decode_base64(hmac_key, "HMAC 密钥", KeyDerivationError),
+            encryption_key=key_b64(encryption_key, "加密密钥"),
+            hmac_key=key_b64(hmac_key, "HMAC 密钥"),
         )
 
     # ── 加解密 ────────────────────────────────────────────────────────────
@@ -101,9 +96,9 @@ class KeyBundle:
 
         HMAC 不过就**绝不**解密 —— 任何异常都收敛成 :class:`~ffsync.errors.DecryptionError`。
         """
-        ciphertext = _decode_base64(ciphertext_b64, "ciphertext")
-        iv = _decode_base64(iv_b64, "IV")
-        expected_mac = _decode_hex(hmac_hex)
+        ciphertext = record_b64(ciphertext_b64, "ciphertext")
+        iv = record_b64(iv_b64, "IV")
+        expected_mac = record_hex(hmac_hex, "hmac")
 
         if not hmac_lib.compare_digest(self._sign(ciphertext_b64), expected_mac):
             msg = "HMAC 校验失败：记录被篡改，或密钥不对"
@@ -193,19 +188,3 @@ class EncryptedPayload(BaseModel):
     def decrypt(self, key: KeyBundle) -> str:
         """用给定密钥解开，返回明文。"""
         return key.decrypt(self.ciphertext, self.iv, self.hmac)
-
-
-def _decode_base64(data: str, what: str, error: type[Exception] = DecryptionError) -> bytes:
-    try:
-        return base64.b64decode(data, validate=True)
-    except (binascii.Error, ValueError) as exc:
-        msg = f"{what} 不是合法的 base64"
-        raise error(msg) from exc
-
-
-def _decode_hex(data: str) -> bytes:
-    try:
-        return binascii.unhexlify(data)
-    except (binascii.Error, ValueError) as exc:
-        msg = "hmac 不是合法的十六进制"
-        raise DecryptionError(msg) from exc
