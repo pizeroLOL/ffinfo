@@ -1,0 +1,60 @@
+name: CI
+
+# 三平台矩阵：让"跨平台"从**声明**变成**事实**。
+#
+# 在此之前测试只在 Linux 容器里跑过 —— Windows 有一条跳过测试、macOS 一条专属测试都没有，
+# 所以"支持 macOS / Windows"一直是句没有证据的话。这一份就是把证据补上。
+#
+# ⚠️ 关于 pyright 那一步：见 `.scratch/ffinfo-mvp/issues/13-pyright没在跑.md`。
+#    pyproject 里 `include` 用的是通配，pyright 不认，所以那一步**目前是空跑**
+#    （`filesAnalyzed: 0`）。修 `include` 之前，它绿不绿都不说明问题。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # 一个平台红了，别把另外两个也掐掉 —— 那正是最需要看到的信息
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    env:
+      # pyproject 里把阿里云设成了默认 index（国内快）。GitHub 的 runner 在国外，
+      # 走镜像反而慢且不稳 —— 这里换回 PyPI。锁文件已经钉死了版本与哈希，换源不改内容。
+      UV_DEFAULT_INDEX: https://pypi.org/simple
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 装 uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          # 锁文件一变就换缓存键 —— 别拿旧缓存去测新依赖
+          cache-dependency-glob: uv.lock
+
+      - name: 装依赖
+        # --frozen：锁文件必须被尊重，否则 CI 测的不是我们要发的东西
+        run: uv sync --frozen
+
+      - name: lint
+        run: uv run ruff check .
+
+      - name: 格式
+        run: uv run ruff format --check .
+
+      - name: 类型检查
+        run: uv run pyright --project pyproject.toml
+
+      - name: 测试
+        run: uv run pytest -q

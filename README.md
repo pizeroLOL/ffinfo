@@ -1,5 +1,10 @@
 # ffinfo
 
+[![CI](https://github.com/pizeroLOL/ffinfo/actions/workflows/ci.yml/badge.svg)](https://github.com/pizeroLOL/ffinfo/actions/workflows/ci.yml)
+
+> 徽章指向的这个仓库是**私有**的 —— 没登录的访客看不到它（徽章会显示成灰色的
+> "no status"）。想看真实的红绿，得先有仓库权限。
+
 把 Firefox 浏览数据（云端 Sync + 本地 `places.sqlite`）拉到本地 SQLite，
 输出纯 JSON 给 agent 消费。
 
