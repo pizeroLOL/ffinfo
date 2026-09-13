@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,68 +19,7 @@ import pytest
 
 from ffinfo.errors import ConfigurationError
 from ffinfo_cli.places import LocalVisit, read_visits, snapshot_places
-
-US = 1_000_000
-SCHEMA = """
-CREATE TABLE moz_places (
-    id INTEGER PRIMARY KEY,
-    url LONGVARCHAR,
-    title LONGVARCHAR,
-    visit_count INTEGER DEFAULT 0,
-    hidden INTEGER DEFAULT 0,
-    typed INTEGER DEFAULT 0
-);
-CREATE TABLE moz_historyvisits (
-    id INTEGER PRIMARY KEY,
-    from_visit INTEGER,
-    place_id INTEGER,
-    visit_date INTEGER,
-    visit_type INTEGER,
-    session INTEGER
-);
-"""
-
-
-def build_places(
-    path: Path,
-    visits: Sequence[tuple[str, str | None, int, int]],
-    *,
-    hidden: Sequence[str] = (),
-) -> sqlite3.Connection:
-    """造一个最小但**结构真实**的 places.sqlite。
-
-    ``visits`` 是 ``(url, title, visit_date_us, visit_type)``。
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(path)
-    connection.executescript(SCHEMA)
-    add_visits(connection, visits, hidden=hidden)
-    connection.commit()
-    return connection
-
-
-def add_visits(
-    connection: sqlite3.Connection,
-    visits: Sequence[tuple[str, str | None, int, int]],
-    *,
-    hidden: Sequence[str] = (),
-) -> None:
-    """往已有的库里加访问 —— 用来模拟"Firefox 又浏览了几页"。"""
-    places: dict[str, int] = {
-        str(row[0]): int(row[1]) for row in connection.execute("SELECT url, id FROM moz_places")
-    }
-    for url, title, visit_date, visit_type in visits:
-        if url not in places:
-            place_id = len(places) + 1
-            places[url] = place_id
-            connection.execute(
-                "INSERT INTO moz_places (id, url, title, hidden) VALUES (?, ?, ?, ?)",
-                (place_id, url, title, 1 if url in hidden else 0),
-            )
-        connection.execute(
-            "INSERT INTO moz_historyvisits (place_id, visit_date, visit_type) VALUES (?, ?, ?)",
-            (places[url], visit_date, visit_type),
-        )
+from support import US, add_visits, build_places
 
 
 @pytest.fixture

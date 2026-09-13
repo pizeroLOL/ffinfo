@@ -34,7 +34,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar, Final
+from typing import Any, ClassVar, Final, Literal
 from urllib.parse import urlsplit
 
 from piccolo.engine.sqlite import SQLiteEngine
@@ -55,6 +55,15 @@ _KEYS_RECORD_ID: Final = "keys"
 
 _MAX_SKIPPED_DETAILS: Final = 10
 """JSON 里最多列几条解密失败的明细。够定位就行，别把整页灌进去。"""
+
+type VisitSource = Literal["sync", "local", "both"]
+"""一条访问打哪儿来 —— **三个值就是全部**，写错了 pyright 当场红。
+
+这个字段是给 agent 消费的契约（见 ``format_version``），不是内部枚举：
+``sync`` 云端 · ``local`` 本地 places · ``both`` 两边都有（合并后只出一行）。"""
+
+type SourceName = Literal["sync", "local"]
+"""``sources`` 里出现的源名 —— ``both`` 不属于这里，它是**合并之后**才有的结论。"""
 
 DATA_TYPES: Final = ("history", "bookmarks", "tabs")
 """``--data-type`` 的取值。"""
@@ -80,7 +89,7 @@ class HistoryItem(BaseModel):
     visit_type_name: str
     record_id: str | None
     """云端那条记录的 GUID。**本地源来的是 ``null``** —— 它压根没有这个 id。"""
-    source: str
+    source: VisitSource
     """这条打哪儿来：``sync``（云端）· ``local``（本地 places）· ``both``（两边都有）。"""
     source_machine: str | None
     """本地源那边导出它的机器名。``source`` 是 ``sync`` 时是 ``null``。"""
@@ -102,8 +111,8 @@ class ListReport(BaseModel):
     """``history`` 用：**云端**拍平后、过滤前的访问次数（一条记录可以有多次访问）。"""
     local_records: int = 0
     """``history`` 用：本地源那边读出来多少条访问。"""
-    sources: list[str] = []
-    """实际出了数据的源（``sync`` / ``local``）。只有一个时就是**降级到单源**了。"""
+    sources: list[SourceName] = []
+    """实际出了数据的源。只有一个时就是**降级到单源**了。"""
     skipped: int
     """解密失败的记录条数 —— 单条坏掉不连坐。"""
     skipped_details: list[dict[str, str]] = []
@@ -262,7 +271,7 @@ class _MergedVisit:
     visited_at: datetime
     visit_type: int
     record_id: str | None
-    source: str
+    source: VisitSource
     machine: str | None
 
 
@@ -325,9 +334,13 @@ def _item(visit: _MergedVisit) -> HistoryItem:
     )
 
 
-def _sources(sync_visits: int, local_visits: int) -> list[str]:
+def _sources(sync_visits: int, local_visits: int) -> list[SourceName]:
     """哪些源真的出了数据 —— 只剩一个就说明这次是**单源降级**。"""
-    return [name for name, count in (("sync", sync_visits), ("local", local_visits)) if count]
+    pairs: tuple[tuple[SourceName, int], ...] = (
+        ("sync", sync_visits),
+        ("local", local_visits),
+    )
+    return [name for name, count in pairs if count]
 
 
 def _bookmark_report(

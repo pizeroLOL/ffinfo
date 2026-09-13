@@ -27,6 +27,7 @@ from ffinfo_cli.store import (
     store_batches,
     store_local_visits,
 )
+from support import us_of as micros
 
 KSYNC = bytes(range(64))
 """凭据里那把 kSync —— 与 ``test_sync.py`` 用的是同一把。"""
@@ -42,10 +43,6 @@ DAY = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
 
 def b64(key: bytes) -> str:
     return base64.b64encode(key).decode("ascii")
-
-
-def micros(moment: datetime) -> int:
-    return int(moment.timestamp() * 1_000_000)
 
 
 def write_credentials(tmp_path: Path) -> tuple[Path, Path]:

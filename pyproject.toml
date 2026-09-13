@@ -92,8 +92,14 @@ extraPaths = ["packages/ffinfo/tests"]
 # ── pytest ─────────────────────────────────────────────────
 [tool.pytest.ini_options]
 testpaths = ["packages/*/tests"]
-# tests 目录也在 path 上：测试向量模块（packages/ffinfo/tests/vectors.py）要能被 import
-pythonpath = ["packages/ffinfo/src", "packages/ffinfo-cli/src", "packages/ffinfo/tests"]
+# 两个 tests 目录也在 path 上：测试向量模块（packages/ffinfo/tests/vectors.py）与
+# 共享测试工具（packages/ffinfo-cli/tests/support.py）都要能被 import
+pythonpath = [
+    "packages/ffinfo/src",
+    "packages/ffinfo-cli/src",
+    "packages/ffinfo/tests",
+    "packages/ffinfo-cli/tests",
+]
 asyncio_mode = "auto"
 # 两个包各有同名 test 文件，用 importlib 模式避免 basename 冲突
 addopts = "-ra --strict-markers --import-mode=importlib"

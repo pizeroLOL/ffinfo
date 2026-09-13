@@ -34,45 +34,11 @@ from ffinfo_cli.store import (
     store_batches,
 )
 from ffinfo_cli.transfer import export_blocking, import_blocking, run_export, run_import
+from support import US, build_places
+from support import us_of as micros
 
-US = 1_000_000
 DAY = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
 MOMENT = "2026-09-14T02:00:00+00:00"
-SCHEMA = """
-CREATE TABLE moz_places (
-    id INTEGER PRIMARY KEY, url LONGVARCHAR, title LONGVARCHAR,
-    visit_count INTEGER DEFAULT 0, hidden INTEGER DEFAULT 0, typed INTEGER DEFAULT 0
-);
-CREATE TABLE moz_historyvisits (
-    id INTEGER PRIMARY KEY, from_visit INTEGER, place_id INTEGER,
-    visit_date INTEGER, visit_type INTEGER, session INTEGER
-);
-"""
-
-
-def micros(moment: datetime) -> int:
-    return int(moment.timestamp() * US)
-
-
-def build_places(path: Path, visits: list[tuple[str, str | None, int, int]]) -> sqlite3.Connection:
-    """造一个最小但结构真实的 places.sqlite。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(path)
-    connection.executescript(SCHEMA)
-    places: dict[str, int] = {}
-    for url, title, visit_date, visit_type in visits:
-        if url not in places:
-            place_id = len(places) + 1
-            places[url] = place_id
-            connection.execute(
-                "INSERT INTO moz_places (id, url, title) VALUES (?, ?, ?)", (place_id, url, title)
-            )
-        connection.execute(
-            "INSERT INTO moz_historyvisits (place_id, visit_date, visit_type) VALUES (?, ?, ?)",
-            (places[url], visit_date, visit_type),
-        )
-    connection.commit()
-    return connection
 
 
 def profile_with_firefox(home: Path, visits: list[tuple[str, str | None, int, int]]) -> Path:
