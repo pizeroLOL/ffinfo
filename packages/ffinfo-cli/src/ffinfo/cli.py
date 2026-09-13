@@ -8,6 +8,9 @@ from __future__ import annotations
 import typer
 
 from ffinfo import __version__
+from ffinfo.login import login_sync
+from ffinfo.paths import credentials_path, identity_path
+from ffsync.errors import FfsyncError
 
 app = typer.Typer(
     name="ffinfo",
@@ -35,6 +38,24 @@ def main(
     ),
 ) -> None:
     """ffinfo —— Firefox 数据到本地 SQLite 的搬运工。"""
+
+
+@app.command()
+def login() -> None:
+    """登录 Mozilla 账号：在浏览器里授权，密码不经过本工具。"""
+    try:
+        credentials = login_sync(identity_path=identity_path(), credentials_path=credentials_path())
+    except FfsyncError as exc:
+        typer.echo(f"登录失败：{exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    bundle = credentials.sync_key_bundle()
+    typer.echo()
+    typer.echo(
+        "登录成功 —— 同步密钥已就绪"
+        f"（{len(bundle.encryption_key)} 字节加密密钥 + {len(bundle.hmac_key)} 字节签名密钥）。"
+    )
+    typer.echo(f"凭据已加密存到 {credentials_path()}")
 
 
 @app.command()
