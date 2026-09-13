@@ -256,6 +256,45 @@ async def test_output_carries_format_version_and_filters(tmp_path: Path) -> None
     assert payload["generated_at"] == "2026-09-13T17:30:12+00:00"
 
 
+async def test_never_synced_says_so_instead_of_pretending(tmp_path: Path) -> None:
+    """没同步过的 collection 没有新鲜度可言 —— 是 null，不是 0、也不是"现在"。"""
+    await build_db(tmp_path, [history_record("rec")])
+
+    report = await run(tmp_path)
+    payload = json.loads(report.to_json())
+
+    assert report.synced_at is None
+    assert report.age_seconds is None
+    assert payload["synced_at"] is None
+    assert payload["age_seconds"] is None
+
+
+async def test_freshness_reflects_the_last_successful_sync(tmp_path: Path) -> None:
+    """同步过的话，"数据有多陈"要说得出来 —— 差一秒都对不上。"""
+    await build_db(tmp_path, [history_record("rec")])
+    store = await open_database(tmp_path / "db.sqlite")
+    await store.save_cursor(
+        "history", last_modified=1_789_320_600.0, synced_at=NOW - 3600, records=1
+    )
+
+    report = await run(tmp_path)
+
+    assert report.synced_at == "2026-09-13T16:30:12+00:00"
+    assert report.age_seconds == 3600.0
+
+
+async def test_freshness_counts_only_the_listed_collection(tmp_path: Path) -> None:
+    """别拿书签的同步时间给历史充数 —— 各 collection 各论各的。"""
+    await build_db(tmp_path, [history_record("rec")])
+    store = await open_database(tmp_path / "db.sqlite")
+    await store.save_cursor("bookmarks", last_modified=1.0, synced_at=NOW - 60, records=0)
+
+    report = await run(tmp_path)
+
+    assert report.synced_at is None
+    assert report.age_seconds is None
+
+
 async def test_tombstones_are_not_listed(tmp_path: Path) -> None:
     """墓碑（别的设备删掉的）不该出现在浏览历史里，也不算"坏掉"。"""
     await build_db(
@@ -600,12 +639,12 @@ async def test_local_visit_borrows_the_sync_title_when_it_has_none(tmp_path: Pat
 
 
 async def test_format_version_bumped_for_the_new_shape(tmp_path: Path) -> None:
-    """输出多了 source / source_machine、record_id 也可能为 null —— 形状变了就得报。"""
+    """形状变过两次：``source`` / ``source_machine``（2）、数据新鲜度（3）—— 每次都报出来。"""
     await build_db(tmp_path, [history_record("rec")])
 
     report = await run(tmp_path)
 
-    assert report.format_version == 2
+    assert report.format_version == 3
 
 
 async def test_json_shape_of_a_merged_row(tmp_path: Path) -> None:

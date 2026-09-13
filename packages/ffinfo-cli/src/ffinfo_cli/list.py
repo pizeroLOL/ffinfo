@@ -99,13 +99,19 @@ class ListReport(BaseModel):
 
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
 
-    format_version: int = 2
-    """**2**：历史条目加了 ``source`` / ``source_machine``，``record_id`` 可为 null。"""
+    format_version: int = 3
+    """**3**：加了 ``synced_at`` / ``age_seconds``（数据新鲜度）。
+    **2**：历史条目加了 ``source`` / ``source_machine``，``record_id`` 可为 null。"""
     data_type: str
     generated_at: str
     filters: dict[str, str | int | None]
     records: int
     """库里读出来的记录条数。"""
+    synced_at: str | None = None
+    """这个 collection **上次成功 sync** 的时间（UTC ISO）。
+    从未同步过就是 ``null`` —— 别假装有数据。"""
+    age_seconds: float | None = None
+    """``synced_at`` 距现在多少秒：**数据有多陈**。消费方自己决定要不要先跑 ``sync``。"""
     visits: int = 0
     """``history`` 用：**云端**拍平后、过滤前的访问次数（一条记录可以有多次访问）。"""
     local_records: int = 0
@@ -200,9 +206,19 @@ async def run_list(
     # 本地源只有历史这一种 —— 书签与标签页是云端独有
     local = await store.load_local_visits() if data_type == "history" else ()
 
+    # 数据新鲜度：sync 挂了的时候 list 照样输出，但"陈"这件事要有字段说出来
+    cursor = next(
+        (item for item in await store.load_cursors() if item.collection == data_type), None
+    )
     common = {
         "generated_at": datetime.fromtimestamp(clock(), tz=UTC).isoformat(),
         "data_type": data_type,
+        "synced_at": (
+            datetime.fromtimestamp(cursor.synced_at, tz=UTC).isoformat()
+            if cursor is not None
+            else None
+        ),
+        "age_seconds": round(clock() - cursor.synced_at, 1) if cursor is not None else None,
         "filters": {
             "since": since.isoformat() if since is not None else None,
             "domain": domain,
