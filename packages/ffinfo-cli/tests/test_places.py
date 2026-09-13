@@ -36,9 +36,6 @@ def names(found: tuple[object, ...]) -> list[str]:
     return [profile.name for profile in found]  # type: ignore[attr-defined]
 
 
-# ── 三平台的根目录 ────────────────────────────────────────────────────────
-
-
 def test_linux_reads_default_profile_from_ini(tmp_path: Path) -> None:
     root = tmp_path / LINUX_ROOT
     make_profile(root, "abc123.default-release")
@@ -139,9 +136,6 @@ Default=1
             Path(".var/app/org.mozilla.firefox/.mozilla/firefox"),
         )
     }
-
-
-# ── profiles.ini 的细节 ──────────────────────────────────────────────────
 
 
 def test_profile_without_places_sqlite_is_ignored(tmp_path: Path) -> None:
@@ -265,9 +259,6 @@ Default=1
     found = discover_profiles(home=tmp_path, platform="linux", env={})
 
     assert names(found)[0] == "zzz"
-
-
-# ── find_profile：挑一个，或者给出能照做的错误 ──────────────────────────
 
 
 def test_find_profile_prefers_the_default(tmp_path: Path) -> None:

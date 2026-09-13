@@ -49,9 +49,6 @@ def live_places(tmp_path: Path) -> Iterator[tuple[Path, int]]:
         connection.close()
 
 
-# ── 快照 ──────────────────────────────────────────────────────────────────
-
-
 def test_snapshot_carries_the_wal_and_shm(tmp_path: Path, live_places: tuple[Path, int]) -> None:
     """Firefox 运行中：附属文件必须一起走，否则最近的数据留在原地。"""
     source, count = live_places
@@ -96,9 +93,6 @@ def test_snapshot_missing_database_is_actionable(tmp_path: Path) -> None:
         snapshot_places(tmp_path / "profile" / "places.sqlite", into=tmp_path / "snap")
 
     assert "places.sqlite" in str(caught.value)
-
-
-# ── 读取 ──────────────────────────────────────────────────────────────────
 
 
 def test_read_visits_one_row_per_visit(tmp_path: Path) -> None:

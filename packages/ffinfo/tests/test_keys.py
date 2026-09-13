@@ -35,9 +35,6 @@ def _collection_keys() -> CollectionKeys:
     return CollectionKeys.from_encrypted_payload(_crypto_keys_payload(), _root_key())
 
 
-# ── scoped key：OAuth 的产物 ──────────────────────────────────────────────
-
-
 def test_scoped_key_decodes_to_sync_key_bundle() -> None:
     keys = parse_scoped_keys(SCOPED_KEY.payload_json)
 
@@ -109,9 +106,6 @@ def test_scoped_keys_payload_without_any_scope_is_empty() -> None:
     assert parse_scoped_keys("{}") == {}
 
 
-# ── crypto/keys → 各 collection 的密钥 ────────────────────────────────────
-
-
 def test_collection_keys_come_out_of_the_encrypted_record() -> None:
     keys = _collection_keys()
 
@@ -153,9 +147,6 @@ def test_crypto_keys_with_garbage_cleartext_is_rejected() -> None:
 
     with pytest.raises(DecryptionError):
         CollectionKeys.from_encrypted_payload(payload, root)
-
-
-# ── 端到端：一条记录用拿到的 collection 密钥解开 ──────────────────────────
 
 
 def test_collection_key_actually_decrypts_a_record() -> None:

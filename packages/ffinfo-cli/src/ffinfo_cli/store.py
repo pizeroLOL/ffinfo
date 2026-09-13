@@ -199,9 +199,6 @@ async def _enforce_record_identity(engine: SQLiteEngine) -> None:
     )
 
 
-# ── 写入 ──────────────────────────────────────────────────────────────────
-
-
 async def store_batches(
     engine: SQLiteEngine, batches: Sequence[CollectionBatch]
 ) -> dict[str, ApplyResult]:
@@ -340,9 +337,6 @@ def _row(collection: str, record: EncryptedBso) -> SyncRecord:
     )
 
 
-# ── 游标 ──────────────────────────────────────────────────────────────────
-
-
 async def load_cursor(engine: SQLiteEngine, collection: str) -> float | None:
     """读游标。没有、或者值坏了（不是个数字）都返回 ``None`` —— 调用方回退到全量。
 
@@ -380,9 +374,6 @@ async def save_cursor(
                 records=records,
             )
         )
-
-
-# ── 读取 ──────────────────────────────────────────────────────────────────
 
 
 async def load_records(engine: SQLiteEngine, collection: str) -> list[tuple[str, str | None]]:
@@ -426,9 +417,6 @@ async def load_cursors(engine: SQLiteEngine) -> tuple[CursorInfo, ...]:
         )
         for row in rows
     )
-
-
-# ── 本地源（places.sqlite 来的） ──────────────────────────────────────────
 
 
 async def store_local_visits(engine: SQLiteEngine, visits: Sequence[StoredVisit]) -> ApplyResult:
@@ -498,9 +486,6 @@ async def load_local_visits(engine: SQLiteEngine) -> tuple[StoredVisit, ...]:
         )
         for row in rows
     )
-
-
-# ── 导入时的合并（便携文件 → 本地库） ─────────────────────────────────────
 
 
 async def merge_sync_records(

@@ -55,9 +55,6 @@ def _client(handler: Callable[[httpx.Request], httpx.Response] | None = None) ->
     )
 
 
-# ── PKCE ──────────────────────────────────────────────────────────────────
-
-
 def test_pkce_matches_rfc7636_appendix_b() -> None:
     """RFC 7636 Appendix B：verifier → challenge 的官方测试向量。"""
     pair = PkcePair.from_verifier("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
@@ -71,9 +68,6 @@ def test_generated_verifier_is_within_rfc7636_length() -> None:
 
 def test_generated_pkce_pairs_are_unique() -> None:
     assert PkcePair.generate().verifier != PkcePair.generate().verifier
-
-
-# ── 授权 URL ──────────────────────────────────────────────────────────────
 
 
 def test_authorization_url_carries_everything_mozilla_needs() -> None:
@@ -118,9 +112,6 @@ def test_each_authorization_request_has_its_own_state_and_key() -> None:
     assert first.key_pair.public_jwk() != second.key_pair.public_jwk()
 
 
-# ── 用户粘回来的回调 URL ──────────────────────────────────────────────────
-
-
 def test_parses_the_pasted_callback_url() -> None:
     url = f"{REDIRECT_URI}?code=abc123&state={STATE}"
 
@@ -157,9 +148,6 @@ def test_user_denying_access_is_reported_clearly() -> None:
 def test_callback_without_a_code_is_refused(url: str) -> None:
     with pytest.raises(AuthError):
         parse_callback_url(url, expected_state=STATE)
-
-
-# ── 用授权码换 token ──────────────────────────────────────────────────────
 
 
 def _token_response(**overrides: object) -> dict[str, object]:
@@ -316,9 +304,6 @@ def test_key_pair_survives_the_round_trip_to_mozilla() -> None:
     jwe = _encrypt_for(request.key_pair.public_jwk(), '{"scope": "oldsync"}')
 
     assert request.key_pair.decrypt_jwe(jwe) == '{"scope": "oldsync"}'
-
-
-# ── 凭据：整理、序列化、落盘 ──────────────────────────────────────────────
 
 
 def _credentials(now: float = 1_000.0) -> Credentials:

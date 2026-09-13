@@ -33,9 +33,6 @@ def client_json(
     return json.dumps(payload)
 
 
-# ── 解析 ──────────────────────────────────────────────────────────────────
-
-
 def test_one_bso_is_one_client() -> None:
     """一个 BSO = 一台设备 —— 别把标签页拍成一长条。"""
     report = parse_tabs([("client1", encrypt(client_json()))], KEY)
@@ -144,9 +141,6 @@ def test_many_tabs_on_one_client() -> None:
 
     assert report.clients[0].count == 5
     assert len(report.entries) == 5
-
-
-# ── 单条坏掉不连坐 ────────────────────────────────────────────────────────
 
 
 def test_one_bad_record_does_not_kill_the_batch() -> None:

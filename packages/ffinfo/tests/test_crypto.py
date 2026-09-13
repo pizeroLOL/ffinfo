@@ -20,9 +20,6 @@ def _official_bundle() -> KeyBundle:
     return KeyBundle.from_base64(AES.enc_key_b64, AES.hmac_key_b64)
 
 
-# ── 64 字节 kSync 的切分 ───────────────────────────────────────────────────
-
-
 def test_ksync_bytes_split_into_enc_and_mac() -> None:
     bundle = KeyBundle.from_ksync_bytes(bytes.fromhex(SCOPED_KEY.ksync_hex))
 
@@ -64,9 +61,6 @@ def test_key_bundle_repr_does_not_leak_keys() -> None:
 def test_key_bundle_compares_by_key_material() -> None:
     assert _official_bundle() == _official_bundle()
     assert _official_bundle() != KeyBundle(b"\x11" * 32, b"\x22" * 32)
-
-
-# ── 记录解密（官方向量） ───────────────────────────────────────────────────
 
 
 def test_decrypts_official_record() -> None:
@@ -128,9 +122,6 @@ def test_ciphertext_not_multiple_of_block_is_rejected() -> None:
 
     with pytest.raises(DecryptionError):
         _official_bundle().decrypt(truncated, AES.iv_b64, AES.hmac_hex)
-
-
-# ── EncryptedPayload（服务器上一条记录的 payload 形态） ────────────────────
 
 
 def test_encrypted_payload_decrypts_official_vector() -> None:

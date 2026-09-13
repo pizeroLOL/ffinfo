@@ -25,9 +25,6 @@ from ffinfo_cli.cli import app, error_payload
 runner = CliRunner()
 
 
-# ── 异常 → (退出码, 错误码) ───────────────────────────────────────────────
-
-
 @pytest.mark.parametrize(
     ("exc", "code", "name"),
     [
@@ -64,9 +61,6 @@ def test_unknown_error_falls_back_but_keeps_the_message() -> None:
     assert error_payload(Weird("没见过")) == (1, {"error": {"code": "error", "message": "没见过"}})
 
 
-# ── 用法错误：exit 2 + usage ─────────────────────────────────────────────
-
-
 @pytest.mark.parametrize(
     "argv",
     [
@@ -83,9 +77,6 @@ def test_usage_errors_are_exit_2_and_json(argv: list[str]) -> None:
 
     assert result.exit_code == 2
     assert json.loads(result.stderr)["error"]["code"] == "usage"
-
-
-# ── 本地状态错误：exit 3 + configuration ─────────────────────────────────
 
 
 def test_missing_credentials_is_configuration_exit_3(

@@ -21,9 +21,6 @@ def _official_pair() -> EphemeralKeyPair:
     return EphemeralKeyPair.from_private_bytes(d)
 
 
-# ── 解开官方的 keys_jwe ────────────────────────────────────────────────────
-
-
 def test_decrypts_the_official_keys_jwe() -> None:
     assert _official_pair().decrypt_jwe(JWE.jwe) == JWE.expected_keys_json
 
@@ -33,9 +30,6 @@ def test_result_feeds_straight_into_scoped_key_parsing() -> None:
     keys = parse_scoped_keys(_official_pair().decrypt_jwe(JWE.jwe))
 
     assert len(keys[OLD_SYNC_SCOPE].key_bytes()) == 64
-
-
-# ── 坏输入 ────────────────────────────────────────────────────────────────
 
 
 def test_another_private_key_cannot_open_it() -> None:
@@ -77,9 +71,6 @@ def _flip(segment: str) -> str:
     """把一段 base64url 的最后 4 个字符换掉，保持长度。"""
     tail = "AAAA" if segment[-4:] != "AAAA" else "BBBB"
     return segment[:-4] + tail
-
-
-# ── 给 Mozilla 的 keys_jwk ────────────────────────────────────────────────
 
 
 def test_public_jwk_is_a_p256_key_without_the_private_part() -> None:

@@ -66,8 +66,6 @@ class KeyBundle:
         """刻意不打印密钥材料。"""
         return f"KeyBundle(encryption_key=<{_KEY_SIZE} 字节>, hmac_key=<{_KEY_SIZE} 字节>)"
 
-    # ── 构造 ──────────────────────────────────────────────────────────────
-
     @classmethod
     def from_ksync_bytes(cls, ksync: bytes) -> Self:
         """从 64 字节 kSync 切出密钥对：前 32 字节加密，后 32 字节签名。"""
@@ -88,8 +86,6 @@ class KeyBundle:
             encryption_key=key_b64(encryption_key, "加密密钥"),
             hmac_key=key_b64(hmac_key, "HMAC 密钥"),
         )
-
-    # ── 加解密 ────────────────────────────────────────────────────────────
 
     def decrypt(self, ciphertext_b64: str, iv_b64: str, hmac_hex: str) -> str:
         """校验 HMAC 后解密，返回明文。
@@ -129,8 +125,6 @@ class KeyBundle:
             base64.b64encode(iv).decode("ascii"),
             self._sign(ciphertext_b64).hex(),
         )
-
-    # ── 内部 ──────────────────────────────────────────────────────────────
 
     def _sign(self, ciphertext_b64: str) -> bytes:
         """HMAC-SHA256 —— 注意签的是 **base64 字符串**，不是原始密文字节。"""

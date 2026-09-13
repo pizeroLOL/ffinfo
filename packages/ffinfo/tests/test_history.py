@@ -50,9 +50,6 @@ def record_json(
     return json.dumps(payload)
 
 
-# ── 解析 ──────────────────────────────────────────────────────────────────
-
-
 def test_parses_a_record_into_one_entry_per_visit() -> None:
     """一次访问一行 —— 这才叫"浏览历史"。"""
     cleartext = record_json(
@@ -148,9 +145,6 @@ def test_history_record_model_directly() -> None:
     assert record.hist_uri == "https://x.test/"
     assert record.title == ""
     assert record.visits[0].date == 1
-
-
-# ── 批量解密：单条坏掉不连坐 ──────────────────────────────────────────────
 
 
 def test_one_bad_record_does_not_kill_the_batch() -> None:

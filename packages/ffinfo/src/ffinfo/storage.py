@@ -296,8 +296,6 @@ class SyncStorageClient:
         """服务器最近一次要求的退避 —— 调用方一般不用管，``_send`` 会自己拦。"""
         return self._backoff
 
-    # ── tokenserver ───────────────────────────────────────────────────────
-
     async def token(self, *, force: bool = False) -> TokenserverToken:
         """拿 tokenserver 凭证；带缓存，快过期就自动换。"""
         now = self._clock()
@@ -330,8 +328,6 @@ class SyncStorageClient:
         except ValidationError as exc:
             msg = "tokenserver 的响应不是我们认识的样子"
             raise SyncProtocolError(msg) from exc
-
-    # ── 存储端点 ──────────────────────────────────────────────────────────
 
     async def collection_counts(self) -> dict[str, int]:
         """各 collection 的条数 —— 验收里"服务器报告的计数"就是它。
@@ -472,8 +468,6 @@ class SyncStorageClient:
             server_count=server_count,
         )
 
-    # ── 底层请求 ──────────────────────────────────────────────────────────
-
     async def _authorized_get(
         self, url: httpx.URL, *, if_unmodified_since: float | None = None
     ) -> httpx.Response:
@@ -553,9 +547,6 @@ class SyncStorageClient:
             self._backoff.note_hard(wait, now=now)
         msg = f"服务器要求退避，还需等待 {wait:.0f} 秒（Retry-After）"
         raise BackoffError(msg, wait_seconds=wait, soft=False)
-
-
-# ── 响应解析 ──────────────────────────────────────────────────────────────
 
 
 def _collection_url(

@@ -148,7 +148,6 @@ async def run_sync(
     engine = await open_database(database_path)
     targets = (collection, *_PROTOCOL_COLLECTIONS)
 
-    # ── 先全部拉下来，一条都别写 ──────────────────────────────────────────
     cursors: dict[str, float | None] = {}
     fetches: dict[str, CollectionFetch] = {}
     batches: list[CollectionBatch] = []
@@ -161,10 +160,8 @@ async def run_sync(
         fetches[name] = fetch
         batches.append(CollectionBatch(collection=name, records=fetch.records, full=cursor is None))
 
-    # ── 全成或全不写 ──────────────────────────────────────────────────────
     results = await store_batches(engine, batches)
 
-    # ── 数据安全落地了，才推进游标 ────────────────────────────────────────
     now = clock()
     for name in targets:
         await save_cursor(

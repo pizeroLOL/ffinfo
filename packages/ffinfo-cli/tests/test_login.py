@@ -34,9 +34,6 @@ _KEYS_JSON = SCOPED_KEY.payload_json
 _AUTH_CODE = "auth-code-from-the-address-bar"
 
 
-# ── login 的整条编排 ─────────────────────────────────────────────────────
-
-
 class _FakeReceiver:
     """模拟用户：从授权 URL 里抄下 state，直接伪造一条回调。"""
 
@@ -145,9 +142,6 @@ async def test_login_reuses_an_existing_identity(tmp_path: Path) -> None:
 async def test_login_refuses_a_mismatched_state(tmp_path: Path) -> None:
     with pytest.raises(AuthError):
         await _login(tmp_path, _BadStateReceiver())
-
-
-# ── 测试用的最小 JWE 加密器（产品代码只做解密方向） ──────────────────────
 
 
 def _b64e(data: bytes) -> str:

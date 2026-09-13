@@ -36,9 +36,6 @@ def _store(tmp_path: Path) -> CredentialStore:
     )
 
 
-# ── 往返 ──────────────────────────────────────────────────────────────────
-
-
 def test_round_trip(tmp_path: Path) -> None:
     store = _store(tmp_path)
 
@@ -79,9 +76,6 @@ def test_save_overwrites_previous_credentials(tmp_path: Path) -> None:
     store.save('{"access_token": "second"}')
 
     assert store.load() == '{"access_token": "second"}'
-
-
-# ── 私钥文件的权限 ────────────────────────────────────────────────────────
 
 
 @_POSIX_ONLY
@@ -160,9 +154,6 @@ def test_corrupted_identity_file_is_refused(tmp_path: Path, content: str) -> Non
         AgeIdentity.from_file(path)
 
 
-# ── 凭据文件的各种坏情况 ──────────────────────────────────────────────────
-
-
 def test_missing_credentials_file_is_refused(tmp_path: Path) -> None:
     store = _store(tmp_path)
 
@@ -207,9 +198,6 @@ def test_ciphertext_from_another_identity_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(DecryptionError):
         stranger.load()
-
-
-# ── 库不持有默认路径 ──────────────────────────────────────────────────────
 
 
 def test_store_requires_explicit_paths() -> None:

@@ -43,8 +43,6 @@ class AgeIdentity:
         """刻意不打印私钥。"""
         return "AgeIdentity(<已隐藏>)"
 
-    # ── 构造 ──────────────────────────────────────────────────────────────
-
     @classmethod
     def generate(cls) -> Self:
         """现场生成一对新密钥。"""
@@ -66,13 +64,9 @@ class AgeIdentity:
             raise ConfigurationError(msg) from exc
         return cls(identity)
 
-    # ── 落盘 ──────────────────────────────────────────────────────────────
-
     def to_file(self, path: Path) -> None:
         """写到调用者指定的路径；POSIX 上权限 0600（Windows 上没有这一步）。"""
         _write_private(path, str(self._identity).encode("utf-8"), "私钥文件")
-
-    # ── 加解密 ────────────────────────────────────────────────────────────
 
     def recipient(self) -> pyrage.x25519.Recipient:
         """对应的公钥 —— 给别人拿去加密用。"""

@@ -74,9 +74,6 @@ async def export_from(
     )
 
 
-# ── export ────────────────────────────────────────────────────────────────
-
-
 async def test_export_reads_the_profile_and_writes_a_portable_file(tmp_path: Path) -> None:
     home = tmp_path / "home"
     profile_with_firefox(
@@ -151,9 +148,6 @@ async def test_export_report_says_what_happened(tmp_path: Path) -> None:
     assert payload["profile"] == "default-release"
     assert payload["schema_version"] == 1
     assert payload["visits"] == 1
-
-
-# ── import ────────────────────────────────────────────────────────────────
 
 
 def portable_file(path: Path, *, visits: list[tuple[str, int]], machine: str = "src") -> None:
@@ -255,9 +249,6 @@ def portable_record(record_id: str, *, modified: float) -> PortableRecord:
         sortindex=None,
         ttl=None,
     )
-
-
-# ── 端到端 ────────────────────────────────────────────────────────────────
 
 
 async def test_export_then_import_then_query(tmp_path: Path) -> None:

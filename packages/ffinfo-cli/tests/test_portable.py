@@ -79,9 +79,6 @@ def write(path: Path, **kwargs: object) -> None:
     write_portable(path, **{**defaults, **kwargs})  # type: ignore[arg-type]
 
 
-# ── 往返 ──────────────────────────────────────────────────────────────────
-
-
 def test_round_trip(tmp_path: Path) -> None:
     path = tmp_path / "portable.sqlite"
 
@@ -152,9 +149,6 @@ def test_latest_visit_survives_the_round_trip(tmp_path: Path) -> None:
     assert read_portable(path).meta.latest_visit_us == 1_800_000_000 * US
 
 
-# ── 拒收：这不是我们的文件 ────────────────────────────────────────────────
-
-
 def test_missing_file_is_actionable(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError) as caught:
         read_portable(tmp_path / "nope.sqlite")
@@ -199,9 +193,6 @@ def test_schema_version_mismatch_is_refused(tmp_path: Path) -> None:
         read_portable(path)
 
     assert "99" in str(caught.value)
-
-
-# ── 告警：文件对不上账 ────────────────────────────────────────────────────
 
 
 def test_truncated_file_is_flagged(tmp_path: Path) -> None:

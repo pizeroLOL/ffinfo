@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# ── 向量 1：AES-256-CBC + HMAC-SHA256 记录加解密 ────────────────────────────
 # 出处：application-services/components/sync15/src/key_bundle.rs
 #       （mod test 的常量 + test_decrypt / test_encrypt）
 # 明文本身是一条**历史记录**，正好覆盖 01 的「解密一条历史记录」。
@@ -56,7 +55,6 @@ AES = AesVector(
 )
 
 
-# ── 向量 2：scoped key（OAuth 的产物，64 字节 = 同步 KeyBundle） ─────────────
 # 出处：application-services/components/fxa-client/src/internal/scoped_keys.rs
 #       test_flow —— 用固定 P-256 私钥解开真实 keys_jwe 后得到的 keys JSON。
 # 切分期望值 = 该 k 的 base64url 解码结果，独立算出来后写死在这里。
@@ -120,7 +118,6 @@ JWE = JweVector(
 #   · default / history / bookmarks 的 bulk key = sha256("ffinfo vector: ...")，纯占位
 
 
-# ── 向量 3：crypto/keys 记录 ────────────────────────────────────────────────
 # ⚠️ 上游**没有**现成的 crypto/keys 测试向量，所以这条是本地生成的：
 #   · 明文结构 = `sync15/src/record_types.rs` 的 CryptoKeysRecord +
 #     `syncstorage-rs/docs/src/sync-client/global-storage-v5.md` §crypto/keys
@@ -180,7 +177,6 @@ CRYPTO_KEYS = CryptoKeysVector(
 )
 
 
-# ── 向量 4：keys_jwe（OAuth 授权时 Mozilla 回给客户端的加密 scope 密钥） ─────
 # 出处：application-services/components/fxa-client/src/internal/scoped_keys.rs
 #       test_flow —— 一把固定 P-256 私钥 + 一条真实 keys_jwe → 期望的 keys JSON。
 # 结构：header..encrypted_key.iv.ciphertext.tag（第二段是空的 —— ECDH-ES 直接模式）

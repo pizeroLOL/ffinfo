@@ -141,9 +141,6 @@ async def test_replace_collection_accepts_empty(tmp_path: Path) -> None:
     assert await SyncRecord.count() == 0
 
 
-# ── 对账：全量之后什么没了 ───────────────────────────────────────
-
-
 async def test_full_replace_reports_deleted_and_updated(tmp_path: Path) -> None:
     """``--full`` 的账要能对得上：agent 问"什么被删了"，答案不能永远是 0。"""
     engine = await open_database(tmp_path / "db.sqlite")
@@ -170,9 +167,6 @@ async def test_full_replace_reports_deleted_and_updated(tmp_path: Path) -> None:
     assert applied.updated == 2  # b、c 还在
     assert applied.deleted == 1  # a 没了
     assert applied.total == 4  # 前后并集 {a,b,c,d}
-
-
-# ── 不变式：库里有行 ⇔ 记录存在 ─────────────────────────────────
 
 
 async def test_duplicate_ids_in_one_batch_are_folded(tmp_path: Path) -> None:

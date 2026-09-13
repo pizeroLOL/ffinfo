@@ -150,9 +150,6 @@ def find_profile(
     raise ConfigurationError(msg)
 
 
-# ── 快照与读取 ────────────────────────────────────────────────────────────
-
-
 @dataclass(frozen=True, slots=True)
 class Snapshot:
     """一份**自包含**的 ``places.sqlite`` 快照。"""

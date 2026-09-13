@@ -42,8 +42,6 @@ class EphemeralKeyPair:
         """刻意不打印私钥。"""
         return "EphemeralKeyPair(<已隐藏>)"
 
-    # ── 构造 ──────────────────────────────────────────────────────────────
-
     @classmethod
     def generate(cls) -> Self:
         """现场生成一对新密钥。"""
@@ -58,8 +56,6 @@ class EphemeralKeyPair:
             msg = "不是合法的 P-256 私钥"
             raise KeyDerivationError(msg) from exc
 
-    # ── 公钥 ──────────────────────────────────────────────────────────────
-
     def public_jwk(self) -> dict[str, str]:
         """给 Mozilla 的 ``keys_jwk`` —— 只有公钥，绝不含 ``d``。"""
         numbers = self._private_key.public_key().public_numbers()
@@ -69,8 +65,6 @@ class EphemeralKeyPair:
             "x": b64url_encode(numbers.x.to_bytes(_COORD_SIZE, "big")),
             "y": b64url_encode(numbers.y.to_bytes(_COORD_SIZE, "big")),
         }
-
-    # ── 解密 ──────────────────────────────────────────────────────────────
 
     def decrypt_jwe(self, jwe: str) -> str:
         """解开一条 JWE，返回明文（对 ``keys_jwe`` 来说就是 scoped keys JSON）。"""

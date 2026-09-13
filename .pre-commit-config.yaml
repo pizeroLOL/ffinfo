@@ -1,6 +1,5 @@
 # 用 prek 跑（pre-commit 的 Rust 替代）—— 读的是同一份配置，所以文件名没改。
 repos:
-  # ── 本地钩子：跑的就是 `uv run` 那一份工具，不钉 rev ────────────────────
   # 为什么不用 ruff-pre-commit 那个仓库：它的 rev 是钉死的，而 ruff 的
   # target-version 跟着项目走 —— v0.8.4 不认识 py314，钩子直接 TOML 解析失败。
   # local + system 没有这个漂移：`uv run ruff` 什么样，钩子就是什么样。

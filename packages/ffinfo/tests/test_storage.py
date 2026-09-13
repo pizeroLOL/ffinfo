@@ -111,9 +111,6 @@ def storage_requests(fake: FakeSync, collection: str) -> list[httpx.Request]:
     return [r for r in fake.requests if f"/storage/{collection}" in r.url.path]
 
 
-# ── Hawk 签名 ─────────────────────────────────────────────────────────────
-
-
 def test_hawk_matches_rust_hawk_vector() -> None:
     """rust-hawk 的官方测试向量 —— 规范化串错一个字符这里就红。"""
     credentials = HawkCredentials(
@@ -244,9 +241,6 @@ def test_normalized_request_uses_explicit_port() -> None:
     assert "\nlocalhost\n8080\n" in normalized
 
 
-# ── 退避头的解析 ──────────────────────────────────────────────────────────
-
-
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
@@ -274,9 +268,6 @@ def test_backoff_state_takes_max_and_expires() -> None:
     assert state.required_wait(now=100.0) == 30.0
     assert state.required_wait(now=125.0) == 5.0
     assert state.required_wait(now=200.0) == 0.0
-
-
-# ── tokenserver ───────────────────────────────────────────────────────────
 
 
 async def test_token_request_carries_bearer_and_key_id() -> None:
@@ -328,9 +319,6 @@ async def test_token_error_is_reported() -> None:
 
     with pytest.raises(SyncProtocolError, match="tokenserver 拒绝了"):
         await client.token()
-
-
-# ── 分页 ──────────────────────────────────────────────────────────────────
 
 
 async def test_pages_until_next_offset_disappears() -> None:
@@ -447,9 +435,6 @@ async def test_storage_request_is_hawk_signed() -> None:
     assert 'nonce="' in authorization
 
 
-# ── 计数校验 ──────────────────────────────────────────────────────────────
-
-
 async def test_count_mismatch_is_an_error() -> None:
     """拉到的条数和服务器报告的对不上 —— 宁可报错，也不假装拉全了。"""
     fake = FakeSync()
@@ -481,9 +466,6 @@ async def test_unknown_collection_counts_as_empty() -> None:
 
     assert result.count == 0
     assert result.server_count == 0
-
-
-# ── backoff ───────────────────────────────────────────────────────────────
 
 
 async def test_soft_backoff_stops_paging() -> None:
@@ -556,9 +538,6 @@ async def test_503_without_retry_after_uses_fallback() -> None:
     assert caught.value.wait_seconds == 10.0
 
 
-# ── 读到一半被改 ──────────────────────────────────────────────────────────
-
-
 async def test_412_retries_the_whole_fetch() -> None:
     """412 是"读到一半集合被改了" —— 整段重来，这次拿到干净快照。"""
     fake = FakeSync()
@@ -588,9 +567,6 @@ async def test_412_gives_up_after_retries() -> None:
     assert len([r for r in fake.requests if "/storage/" in r.url.path]) == 4
 
 
-# ── 节点重分配 ────────────────────────────────────────────────────────────
-
-
 async def test_401_with_same_endpoint_retries_once() -> None:
     """401 但端点没变 —— 换个 token 再试一次就好。"""
     fake = FakeSync()
@@ -612,9 +588,6 @@ async def test_401_with_new_endpoint_aborts() -> None:
 
     with pytest.raises(SyncProtocolError, match="节点重分配"):
         await fake.client().fetch_collection("history")
-
-
-# ── 其它协议错误 ──────────────────────────────────────────────────────────
 
 
 async def test_missing_last_modified_is_an_error() -> None:
@@ -663,9 +636,6 @@ async def test_network_failure_is_wrapped() -> None:
         await client.token()
 
 
-# ── 录制的夹具 ────────────────────────────────────────────────────────────
-
-
 async def test_replays_recorded_fixture() -> None:
     """回放**真实录制**的响应（token / counts / 两页历史），脱敏后入库。
 
@@ -708,9 +678,6 @@ def test_encrypted_bso_ignores_unknown_fields() -> None:
         {"id": "a", "modified": 1.0, "payload": "x", "sortindex": 5, "ttl": 60, "future": True}
     )
     assert record.sortindex == 5
-
-
-# ── 翻页进度 ──────────────────────────────────────────────
 
 
 async def test_progress_callback_fires_once_per_page() -> None:

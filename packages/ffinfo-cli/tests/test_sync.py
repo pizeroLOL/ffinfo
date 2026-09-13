@@ -136,9 +136,6 @@ async def sync(
     )
 
 
-# ── 白名单：来历不明的 collection 一律不碰 ────────────────────────────────
-
-
 @pytest.mark.parametrize(
     "collection", ["forms", "passwords", "creditcards", "addresses", "meta", "crypto", "prefs"]
 )
@@ -158,9 +155,6 @@ def test_allowlist_matches_the_documented_scope() -> None:
     """白名单就是设计文档决策 4 那句话：历史 + 书签 + 标签页。"""
     assert sorted(SYNCABLE_COLLECTIONS) == ["bookmarks", "history", "tabs"]
     assert "forms" not in SYNCABLE_COLLECTIONS
-
-
-# ── 正常路径 ──────────────────────────────────────────────────────────────
 
 
 async def test_happy_path_stores_records(tmp_path: Path) -> None:
@@ -236,9 +230,6 @@ async def test_token_server_request_carries_key_id(tmp_path: Path) -> None:
     assert token_request.headers["X-KeyID"] == "KID-123"
 
 
-# ── 失败时绝不写库 ────────────────────────────────────────────────────────
-
-
 async def test_backoff_leaves_database_untouched(tmp_path: Path) -> None:
     """服务器要求退避 —— 报错走人，库里一个字节都不动。"""
     fake = FakeSync()
@@ -287,9 +278,6 @@ async def test_credentials_without_sync_scope_are_refused(tmp_path: Path) -> Non
         await sync(tmp_path, fake, credentials=credentials)
 
     assert fake.requests == []
-
-
-# ── 增量同步 ──────────────────────────────────────────────────────────────
 
 
 async def test_first_sync_is_full(tmp_path: Path) -> None:

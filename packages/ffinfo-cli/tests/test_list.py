@@ -199,9 +199,6 @@ async def run(tmp_path: Path, **kwargs: object) -> ListReport:
     )
 
 
-# ── 解密 + 输出 ───────────────────────────────────────────────────────────
-
-
 async def test_lists_visits_newest_first(tmp_path: Path) -> None:
     """最新的排前面 —— 看历史就该从最近看起。"""
     await build_db(
@@ -274,9 +271,6 @@ async def test_tombstones_are_not_listed(tmp_path: Path) -> None:
     assert report.skipped == 0
 
 
-# ── 单条坏掉不连坐 ────────────────────────────────────────────────────────
-
-
 async def test_broken_record_is_skipped_and_counted(tmp_path: Path) -> None:
     """硬要求：一条被篡改，不该让你看不到另外两条。"""
     broken = EncryptedBso(
@@ -309,9 +303,6 @@ async def test_everything_unreadable_means_the_wrong_account(tmp_path: Path) -> 
         await run(tmp_path)
 
 
-# ── 缺东西时的提示 ────────────────────────────────────────────────────────
-
-
 async def test_missing_keys_record_says_what_to_do(tmp_path: Path) -> None:
     """库里没有 crypto/keys —— 得说清楚"先跑 sync"，而不是抛个 KeyError。"""
     engine = await open_database(tmp_path / "db.sqlite")
@@ -331,9 +322,6 @@ async def test_keys_encrypted_for_another_account_is_reported(tmp_path: Path) ->
 
     with pytest.raises(ConfigurationError, match="crypto/keys 解不开"):
         await run(tmp_path)
-
-
-# ── 过滤 ──────────────────────────────────────────────────────────────────
 
 
 async def test_since_filter(tmp_path: Path) -> None:
@@ -432,9 +420,6 @@ async def test_filters_combine(tmp_path: Path) -> None:
     assert [item.record_id for item in report.items] == ["hit"]
 
 
-# ── 纯函数 ────────────────────────────────────────────────────────────────
-
-
 def test_parse_since_bare_date_is_local_time() -> None:
     """裸日期按本机时区理解 —— 人说的是"自己那天"。"""
     parsed = parse_since("2026-09-13")
@@ -476,9 +461,6 @@ def test_matches_search_covers_several_fields_case_insensitively() -> None:
     assert matches_search("标题", "https://rust-lang.org/", needle="rust")
     assert not matches_search("别的", "https://x.test/", needle="rust")
     assert not matches_search(None, None, needle="rust")
-
-
-# ── 双源合并 ───────────────────────────────────────────────
 
 
 def local_visit(
@@ -650,9 +632,6 @@ async def test_json_shape_of_a_merged_row(tmp_path: Path) -> None:
     }
 
 
-# ── 书签 ─────────────────────────────────────────────────────────
-
-
 async def test_bookmarks_keep_the_tree(tmp_path: Path) -> None:
     await build_db(
         tmp_path,
@@ -764,9 +743,6 @@ async def test_bookmark_json_is_serializable_with_iso_times(tmp_path: Path) -> N
     payload = json.loads(report.to_json())
 
     assert payload["tree"][0]["children"][0]["added_at"] == "2026-09-13T12:00:00+00:00"
-
-
-# ── 标签页 ───────────────────────────────────────────────────────
 
 
 async def test_tabs_are_grouped_by_client(tmp_path: Path) -> None:

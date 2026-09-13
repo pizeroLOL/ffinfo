@@ -56,9 +56,6 @@ def folder_json(record_id: str, *, parent_id: str | None = None, title: str = "F
     return bookmark_json(record_id, parent_id=parent_id, title=title, url=None, kind="folder")
 
 
-# ── 解析 ──────────────────────────────────────────────────────────────────
-
-
 def test_parses_a_bookmark() -> None:
     report = parse_bookmarks([("rec1", encrypt(bookmark_json("rec1")))], KEY)
 
@@ -83,9 +80,6 @@ def test_missing_date_added_is_fine() -> None:
     assert report.roots[0].added_at is None
 
 
-# ── 墓碑：这一种长得不一样 ────────────────────────────────────────────────
-
-
 def test_deleted_records_are_tombstones_not_failures() -> None:
     """书签的墓碑是 ``{"deleted": true}``，不是 payload 为 null —— 别当成坏记录。"""
     cleartext = json.dumps({"id": "gone", "deleted": True})
@@ -102,9 +96,6 @@ def test_bsos_without_payload_are_tombstones_too() -> None:
 
     assert report.tombstones == 1
     assert report.skipped == ()
-
-
-# ── 建树 ──────────────────────────────────────────────────────────────────
 
 
 def test_tree_keeps_the_hierarchy() -> None:
@@ -260,9 +251,6 @@ def test_counts_walks_the_whole_tree() -> None:
     )
 
     assert report.counts() == {"folder": 1, "bookmark": 2}
-
-
-# ── 单条坏掉不连坐 ────────────────────────────────────────────────────────
 
 
 def test_one_bad_record_does_not_kill_the_batch() -> None:
