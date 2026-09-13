@@ -26,7 +26,7 @@
 
 ---
 
-## 2. 决策清单（6 轮拷问成果，19 条）
+## 2. 决策清单（6 轮拷问成果，20 条）
 
 ### 2.1 用途与数据
 
@@ -71,6 +71,7 @@
 | 17 | `export`/`import` 格式：**SQLite** | 因为要支持增量（schema 版本 + 游标 + 校验） |
 | 18 | 工程栈 | **Python 3.14 baseline** · uv · src layout · **pyproject 单文件配置** · ruff · pyright · pytest · pre-commit · 现代 typing · async · httpx · pydantic |
 | 19 | 许可：**MPL-2.0** | 与 Mozilla 生态一致 |
+| 20 | CLI 失败契约：**分档退出码 + stderr 错误 JSON** | 成功时 stdout 只有 JSON；失败时 stdout 为空、stderr 是 `{"error": {"code", "message"}}`，退出码表见 `README.md` |
 
 ### 2.5 库/应用职责分离（新增约束）
 

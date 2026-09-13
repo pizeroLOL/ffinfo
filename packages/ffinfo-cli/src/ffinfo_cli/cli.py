@@ -5,21 +5,30 @@
 
 from __future__ import annotations
 
+import json
 import os
 import socket
 import sys
 from pathlib import Path
-from typing import Final
+from typing import Any, Final, NoReturn
 
 import typer
 
-from ffinfo.errors import BackoffError, FfinfoError
+from ffinfo.errors import (
+    AuthError,
+    BackoffError,
+    ConfigurationError,
+    DecryptionError,
+    FfinfoError,
+    KeyDerivationError,
+    SyncProtocolError,
+)
 from ffinfo_cli import __version__
-from ffinfo_cli.list import list_blocking, parse_since
+from ffinfo_cli.list import DATA_TYPES, list_blocking, parse_since
 from ffinfo_cli.login import login_sync
 from ffinfo_cli.paths import credentials_path, database_path, identity_path
 from ffinfo_cli.progress import reporter_for
-from ffinfo_cli.sync import sync_blocking
+from ffinfo_cli.sync import SYNCABLE_COLLECTIONS, sync_blocking
 from ffinfo_cli.transfer import export_blocking, import_blocking
 
 app = typer.Typer(
@@ -38,6 +47,51 @@ _SOURCE: Final = typer.Argument(..., help="export 产出的那份文件")
 _PROFILE: Final = typer.Option(
     None, "--profile", help="手动指定 Firefox profile 目录（自动找不到时用）"
 )
+
+_MAX_PAGE_SIZE: Final = 100
+"""服务器每页的上限 —— ``--page-size`` 越界会被**拒**，不是静默夹取。"""
+
+_EXIT_CODES: Final[tuple[tuple[type[FfinfoError], int, str], ...]] = (
+    (ConfigurationError, 3, "configuration"),
+    (AuthError, 4, "auth"),
+    (BackoffError, 5, "backoff"),
+    (SyncProtocolError, 6, "protocol"),
+    (DecryptionError, 7, "decryption"),
+    (KeyDerivationError, 8, "key_derivation"),
+)
+"""异常 → (退出码, 错误码)。**这是给 agent 的契约**，README 里有同一张表。"""
+
+
+def error_payload(exc: FfinfoError) -> tuple[int, dict[str, Any]]:
+    """异常 → (退出码, 错误 JSON)。没登记的异常落到兜底档 —— 消息绝不丢。"""
+    for klass, code, name in _EXIT_CODES:
+        if isinstance(exc, klass):
+            error: dict[str, Any] = {"code": name, "message": str(exc)}
+            if isinstance(exc, BackoffError):
+                error["wait_seconds"] = exc.wait_seconds
+                error["soft"] = exc.soft
+            return code, {"error": error}
+    return 1, {"error": {"code": "error", "message": str(exc)}}
+
+
+def _emit_error(payload: dict[str, Any]) -> None:
+    """错误 JSON 走 stderr —— stdout 上永远只有成功的那份结果。"""
+    typer.echo(json.dumps(payload, ensure_ascii=False), err=True)
+
+
+def _fail(exc: FfinfoError, *, note: str = "") -> NoReturn:
+    """失败也机器可读：分档退出码 + stderr 上的错误 JSON。"""
+    code, payload = error_payload(exc)
+    if note:
+        payload["error"]["message"] = f"{payload['error']['message']}{note}"
+    _emit_error(payload)
+    raise typer.Exit(code=code) from exc
+
+
+def _fail_usage(message: str) -> NoReturn:
+    """用法错误 —— 与其它失败共用一套 JSON 外壳；退出码 2 与 typer 自己的口径一致。"""
+    _emit_error({"error": {"code": "usage", "message": message}})
+    raise typer.Exit(code=2)
 
 
 def _version_callback(value: bool) -> None:
@@ -66,8 +120,7 @@ def login() -> None:
     try:
         credentials = login_sync(identity_path=identity_path(), credentials_path=credentials_path())
     except FfinfoError as exc:
-        typer.echo(f"登录失败：{exc}", err=True)
-        raise typer.Exit(code=1) from exc
+        _fail(exc)
 
     bundle = credentials.sync_key_bundle()
     typer.echo()
@@ -100,6 +153,12 @@ def sync(
 
     进度走 **stderr**，stdout 上仍然只有那份 JSON。
     """
+    if collection not in SYNCABLE_COLLECTIONS:
+        allowed = "、".join(sorted(SYNCABLE_COLLECTIONS))
+        _fail_usage(f"不拉 collection「{collection}」—— 本项目只拉这几个：{allowed}")
+    if not 1 <= page_size <= _MAX_PAGE_SIZE:
+        _fail_usage(f"--page-size 要在 1..{_MAX_PAGE_SIZE} 之间（服务器上限），收到 {page_size}")
+
     reporter = reporter_for(sys.stderr, enabled=progress)
     try:
         report = sync_blocking(
@@ -112,15 +171,10 @@ def sync(
             on_progress=reporter,
         )
     except BackoffError as exc:
-        scheme = "X-Weave-Backoff" if exc.soft else "Retry-After"
-        typer.echo(
-            f"服务器要求退避：{exc.wait_seconds:.0f} 秒后再试（{scheme}）。库里没动任何东西。",
-            err=True,
-        )
-        raise typer.Exit(code=1) from exc
+        # 退避不是错误，是"现在别来" —— 顺带告诉 agent 库里没动过，重试是安全的
+        _fail(exc, note="。库里没动任何东西。")
     except FfinfoError as exc:
-        typer.echo(f"同步失败：{exc}", err=True)
-        raise typer.Exit(code=1) from exc
+        _fail(exc)
     finally:
         if reporter is not None:
             reporter.finish()
@@ -148,20 +202,29 @@ def list_command(
     limit: int | None = typer.Option(None, "--limit", "-n", help="最多返回多少条，最新的优先"),
 ) -> None:
     """把库里的浏览数据解密后输出 JSON。纯本地，不联网。"""
+    if data_type not in DATA_TYPES:
+        allowed = "、".join(DATA_TYPES)
+        _fail_usage(f"不认识的 --data-type「{data_type}」—— 只能是：{allowed}")
+    if limit is not None and limit < 0:
+        _fail_usage(f"--limit 不能是负数，收到 {limit}")
+    try:
+        parsed_since = parse_since(since) if since is not None else None
+    except ConfigurationError as exc:
+        _fail_usage(str(exc))
+
     try:
         report = list_blocking(
             identity_path=identity_path(),
             credentials_path=credentials_path(),
             database_path=database_path(),
             data_type=data_type,
-            since=parse_since(since) if since is not None else None,
+            since=parsed_since,
             domain=domain,
             search=search,
             limit=limit,
         )
     except FfinfoError as exc:
-        typer.echo(f"读取失败：{exc}", err=True)
-        raise typer.Exit(code=1) from exc
+        _fail(exc)
 
     typer.echo(report.to_json())
 
@@ -186,8 +249,7 @@ def export(
             profile_path=profile,
         )
     except FfinfoError as exc:
-        typer.echo(f"导出失败：{exc}", err=True)
-        raise typer.Exit(code=1) from exc
+        _fail(exc)
 
     typer.echo(report.to_json())
 
@@ -200,8 +262,7 @@ def import_command(
     try:
         report = import_blocking(database_path=database_path(), source=source)
     except FfinfoError as exc:
-        typer.echo(f"导入失败：{exc}", err=True)
-        raise typer.Exit(code=1) from exc
+        _fail(exc)
 
     typer.echo(report.to_json())
     for warning in report.warnings:

@@ -34,6 +34,27 @@ uv run ffinfo-cli export portable.sqlite     # 连 places.sqlite-wal 一起带�
 uv run ffinfo-cli import portable.sqlite     # 与云端数据合并，每条标出来源
 ```
 
+## 退出码与错误 JSON
+
+成功时 stdout 上只有那份 JSON；**失败时 stdout 是空的**，stderr 上是机器可读的错误
+JSON，退出码分档 —— 调用方不用猜是"参数错了"还是"该重新登录了"：
+
+| 退出码 | `code` | 含义 |
+| --- | --- | --- |
+| 0 | —— | 成功 |
+| 1 | `error` | 兜底（没登记的错误类型） |
+| 2 | `usage` | 用法错误：参数越界、不认识的值 |
+| 3 | `configuration` | 本地配置或凭据问题（先 `login` / 先 `sync`） |
+| 4 | `auth` | 认证失败 —— 重新 `login` |
+| 5 | `backoff` | 服务器要求退避 —— 等 `wait_seconds` 秒再来（`soft` 区分软硬） |
+| 6 | `protocol` | Sync 协议层面出错 |
+| 7 | `decryption` | 记录解密失败 |
+| 8 | `key_derivation` | 密钥派生失败 |
+
+```json
+{"error": {"code": "backoff", "message": "服务器要求退避，还需等待 60 秒（Retry-After）。库里没动任何东西。", "wait_seconds": 60.0, "soft": false}}
+```
+
 ## 开发
 
 ```bash
