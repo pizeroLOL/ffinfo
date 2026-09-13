@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import typer
 
-from ffinfo.errors import FfinfoError
+from ffinfo.errors import BackoffError, FfinfoError
 from ffinfo_cli import __version__
 from ffinfo_cli.login import login_sync
-from ffinfo_cli.paths import credentials_path, identity_path
+from ffinfo_cli.paths import credentials_path, database_path, identity_path
+from ffinfo_cli.sync import sync_blocking
 
 app = typer.Typer(
     name="ffinfo-cli",
@@ -59,10 +60,36 @@ def login() -> None:
 
 
 @app.command()
-def sync() -> None:
-    """从 Firefox Sync 拉取数据（显式触发，不做自动同步）。"""
-    typer.echo("sync: 尚未实现", err=True)
-    raise typer.Exit(code=1)
+def sync(
+    collection: str = typer.Option(
+        "history",
+        "--collection",
+        "-c",
+        help="要拉取的 collection：history / bookmarks / tabs（白名单，其它一律拒绝）",
+    ),
+    page_size: int = typer.Option(100, "--page-size", help="每页拉多少条（服务器上限 100）"),
+) -> None:
+    """从 Firefox Sync 拉取数据并落盘。输出 JSON，拉全了才写库。"""
+    try:
+        report = sync_blocking(
+            identity_path=identity_path(),
+            credentials_path=credentials_path(),
+            database_path=database_path(),
+            collection=collection,
+            page_size=page_size,
+        )
+    except BackoffError as exc:
+        scheme = "X-Weave-Backoff" if exc.soft else "Retry-After"
+        typer.echo(
+            f"服务器要求退避：{exc.wait_seconds:.0f} 秒后再试（{scheme}）。库里没动任何东西。",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+    except FfinfoError as exc:
+        typer.echo(f"同步失败：{exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(report.to_json())
 
 
 @app.command()

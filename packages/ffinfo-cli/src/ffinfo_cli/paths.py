@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Final
 
-_APP: Final = "ffinfo_cli"
+_APP: Final = "ffinfo-cli"
 
 
 def config_dir() -> Path:
@@ -46,3 +46,8 @@ def identity_path() -> Path:
 def credentials_path() -> Path:
     """加密后的 Mozilla 凭据。"""
     return data_dir() / "credentials.age"
+
+
+def database_path() -> Path:
+    """本地 SQLite —— 拉下来的记录落这里。"""
+    return data_dir() / "ffinfo.sqlite"

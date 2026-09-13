@@ -1,0 +1,1027 @@
+{
+  "_note": "真实响应录制的夹具（2026-09-14）。结构、字段名、页大小都是真的；id / payload / modified / offset / token 已脱敏，counts 按录下来的条数改写，好让整条流程自洽。",
+  "token": {
+    "id": "eyJub2RlIjoicmVjb3JkZWQifQ.SIGNATURE",
+    "key": "recordedFixtureKeyNotARealOne00000000000",
+    "uid": 12345,
+    "api_endpoint": "https://sync.test/1.5/12345",
+    "duration": 3600,
+    "hashed_fxa_uid": "deadbeefdeadbeefdeadbeefdeadbeef",
+    "hashalg": "sha256",
+    "node_type": "spanner"
+  },
+  "counts": {
+    "history": 200
+  },
+  "last_modified": "1789320619.51",
+  "expected_count": 200,
+  "pages": [
+    [
+      {
+        "id": "recorded0000",
+        "modified": 1789320500.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0001",
+        "modified": 1789320501.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0002",
+        "modified": 1789320502.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0003",
+        "modified": 1789320503.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0004",
+        "modified": 1789320504.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0005",
+        "modified": 1789320505.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0006",
+        "modified": 1789320506.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0007",
+        "modified": 1789320507.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0008",
+        "modified": 1789320508.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0009",
+        "modified": 1789320509.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0010",
+        "modified": 1789320510.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0011",
+        "modified": 1789320511.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0012",
+        "modified": 1789320512.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0013",
+        "modified": 1789320513.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0014",
+        "modified": 1789320514.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0015",
+        "modified": 1789320515.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0016",
+        "modified": 1789320516.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0017",
+        "modified": 1789320517.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0018",
+        "modified": 1789320518.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0019",
+        "modified": 1789320519.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0020",
+        "modified": 1789320520.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0021",
+        "modified": 1789320521.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0022",
+        "modified": 1789320522.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0023",
+        "modified": 1789320523.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0024",
+        "modified": 1789320524.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0025",
+        "modified": 1789320525.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0026",
+        "modified": 1789320526.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0027",
+        "modified": 1789320527.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0028",
+        "modified": 1789320528.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0029",
+        "modified": 1789320529.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0030",
+        "modified": 1789320530.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0031",
+        "modified": 1789320531.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0032",
+        "modified": 1789320532.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0033",
+        "modified": 1789320533.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0034",
+        "modified": 1789320534.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0035",
+        "modified": 1789320535.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0036",
+        "modified": 1789320536.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0037",
+        "modified": 1789320537.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0038",
+        "modified": 1789320538.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0039",
+        "modified": 1789320539.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0040",
+        "modified": 1789320540.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0041",
+        "modified": 1789320541.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0042",
+        "modified": 1789320542.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0043",
+        "modified": 1789320543.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0044",
+        "modified": 1789320544.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0045",
+        "modified": 1789320545.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0046",
+        "modified": 1789320546.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0047",
+        "modified": 1789320547.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0048",
+        "modified": 1789320548.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0049",
+        "modified": 1789320549.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0050",
+        "modified": 1789320550.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0051",
+        "modified": 1789320551.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0052",
+        "modified": 1789320552.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0053",
+        "modified": 1789320553.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0054",
+        "modified": 1789320554.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0055",
+        "modified": 1789320555.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0056",
+        "modified": 1789320556.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0057",
+        "modified": 1789320557.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0058",
+        "modified": 1789320558.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0059",
+        "modified": 1789320559.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0060",
+        "modified": 1789320560.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0061",
+        "modified": 1789320561.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0062",
+        "modified": 1789320562.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0063",
+        "modified": 1789320563.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0064",
+        "modified": 1789320564.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0065",
+        "modified": 1789320565.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0066",
+        "modified": 1789320566.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0067",
+        "modified": 1789320567.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0068",
+        "modified": 1789320568.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0069",
+        "modified": 1789320569.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0070",
+        "modified": 1789320570.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0071",
+        "modified": 1789320571.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0072",
+        "modified": 1789320572.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0073",
+        "modified": 1789320573.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0074",
+        "modified": 1789320574.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0075",
+        "modified": 1789320575.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0076",
+        "modified": 1789320576.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0077",
+        "modified": 1789320577.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0078",
+        "modified": 1789320578.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0079",
+        "modified": 1789320579.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0080",
+        "modified": 1789320580.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0081",
+        "modified": 1789320581.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0082",
+        "modified": 1789320582.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0083",
+        "modified": 1789320583.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0084",
+        "modified": 1789320584.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0085",
+        "modified": 1789320585.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0086",
+        "modified": 1789320586.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0087",
+        "modified": 1789320587.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0088",
+        "modified": 1789320588.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0089",
+        "modified": 1789320589.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0090",
+        "modified": 1789320590.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0091",
+        "modified": 1789320591.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0092",
+        "modified": 1789320592.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0093",
+        "modified": 1789320593.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0094",
+        "modified": 1789320594.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0095",
+        "modified": 1789320595.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0096",
+        "modified": 1789320596.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0097",
+        "modified": 1789320597.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0098",
+        "modified": 1789320598.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded0099",
+        "modified": 1789320599.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      }
+    ],
+    [
+      {
+        "id": "recorded1000",
+        "modified": 1789321500.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1001",
+        "modified": 1789321501.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1002",
+        "modified": 1789321502.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1003",
+        "modified": 1789321503.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1004",
+        "modified": 1789321504.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1005",
+        "modified": 1789321505.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1006",
+        "modified": 1789321506.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1007",
+        "modified": 1789321507.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1008",
+        "modified": 1789321508.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1009",
+        "modified": 1789321509.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1010",
+        "modified": 1789321510.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1011",
+        "modified": 1789321511.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1012",
+        "modified": 1789321512.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1013",
+        "modified": 1789321513.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1014",
+        "modified": 1789321514.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1015",
+        "modified": 1789321515.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1016",
+        "modified": 1789321516.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1017",
+        "modified": 1789321517.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1018",
+        "modified": 1789321518.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1019",
+        "modified": 1789321519.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1020",
+        "modified": 1789321520.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1021",
+        "modified": 1789321521.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1022",
+        "modified": 1789321522.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1023",
+        "modified": 1789321523.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1024",
+        "modified": 1789321524.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1025",
+        "modified": 1789321525.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1026",
+        "modified": 1789321526.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1027",
+        "modified": 1789321527.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1028",
+        "modified": 1789321528.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1029",
+        "modified": 1789321529.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1030",
+        "modified": 1789321530.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1031",
+        "modified": 1789321531.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1032",
+        "modified": 1789321532.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1033",
+        "modified": 1789321533.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1034",
+        "modified": 1789321534.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1035",
+        "modified": 1789321535.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1036",
+        "modified": 1789321536.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1037",
+        "modified": 1789321537.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1038",
+        "modified": 1789321538.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1039",
+        "modified": 1789321539.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1040",
+        "modified": 1789321540.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1041",
+        "modified": 1789321541.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1042",
+        "modified": 1789321542.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1043",
+        "modified": 1789321543.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1044",
+        "modified": 1789321544.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1045",
+        "modified": 1789321545.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1046",
+        "modified": 1789321546.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1047",
+        "modified": 1789321547.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1048",
+        "modified": 1789321548.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1049",
+        "modified": 1789321549.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1050",
+        "modified": 1789321550.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1051",
+        "modified": 1789321551.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1052",
+        "modified": 1789321552.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1053",
+        "modified": 1789321553.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1054",
+        "modified": 1789321554.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1055",
+        "modified": 1789321555.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1056",
+        "modified": 1789321556.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1057",
+        "modified": 1789321557.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1058",
+        "modified": 1789321558.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1059",
+        "modified": 1789321559.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1060",
+        "modified": 1789321560.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1061",
+        "modified": 1789321561.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1062",
+        "modified": 1789321562.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1063",
+        "modified": 1789321563.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1064",
+        "modified": 1789321564.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1065",
+        "modified": 1789321565.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1066",
+        "modified": 1789321566.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1067",
+        "modified": 1789321567.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1068",
+        "modified": 1789321568.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1069",
+        "modified": 1789321569.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1070",
+        "modified": 1789321570.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1071",
+        "modified": 1789321571.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1072",
+        "modified": 1789321572.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1073",
+        "modified": 1789321573.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1074",
+        "modified": 1789321574.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1075",
+        "modified": 1789321575.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1076",
+        "modified": 1789321576.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1077",
+        "modified": 1789321577.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1078",
+        "modified": 1789321578.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1079",
+        "modified": 1789321579.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1080",
+        "modified": 1789321580.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1081",
+        "modified": 1789321581.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1082",
+        "modified": 1789321582.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1083",
+        "modified": 1789321583.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1084",
+        "modified": 1789321584.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1085",
+        "modified": 1789321585.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1086",
+        "modified": 1789321586.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1087",
+        "modified": 1789321587.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1088",
+        "modified": 1789321588.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1089",
+        "modified": 1789321589.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1090",
+        "modified": 1789321590.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1091",
+        "modified": 1789321591.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1092",
+        "modified": 1789321592.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1093",
+        "modified": 1789321593.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1094",
+        "modified": 1789321594.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1095",
+        "modified": 1789321595.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1096",
+        "modified": 1789321596.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1097",
+        "modified": 1789321597.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1098",
+        "modified": 1789321598.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      },
+      {
+        "id": "recorded1099",
+        "modified": 1789321599.0,
+        "payload": "{\"ciphertext\":\"AAAA\",\"IV\":\"BBBB\",\"hmac\":\"CCCC\"}"
+      }
+    ]
+  ],
+  "next_offsets": [
+    "offset-recorded-page-1"
+  ]
+}

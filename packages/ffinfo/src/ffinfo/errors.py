@@ -27,4 +27,23 @@ class DecryptionError(FfinfoError):
 
 
 class SyncProtocolError(FfinfoError):
-    """Sync 存储协议层面的错误（响应格式异常、服务器要求 backoff 等）。"""
+    """Sync 存储协议层面的错误（响应格式异常、节点重分配、拉取不完整等）。"""
+
+
+class BackoffError(FfinfoError):
+    """服务器要求退避 —— **不是错误，是"现在别来"**。
+
+    与 :class:`SyncProtocolError` 平级而不是它的子类：调用方通常要单独处理
+    （告诉用户"过 N 秒再来"），把它混进"协议出错"里会让这个分支藏起来。
+
+    ``wait_seconds`` 是服务器要的秒数，``soft`` 区分两种退避：
+
+    * ``soft=True`` —— ``X-Weave-Backoff``，服务器还能干活但压力大，**可以出现在 200 响应上**
+    * ``soft=False`` —— ``Retry-After``，配 503（维护）或 409（冲突），硬性要求等待
+    """
+
+    def __init__(self, message: str, *, wait_seconds: float, soft: bool) -> None:
+        """带上要等多久、以及是软退避还是硬退避。"""
+        super().__init__(message)
+        self.wait_seconds = wait_seconds
+        self.soft = soft

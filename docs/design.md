@@ -81,8 +81,8 @@
 client = SyncClient(credentials_path=..., keys_path=..., cache_dir=...)
 
 # ffinfo-cli —— 在这里决定默认
-CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", "~/.config")).expanduser() / "ffinfo"
-DATA_DIR   = Path(os.environ.get("XDG_DATA_HOME", "~/.local/share")).expanduser() / "ffinfo"
+CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", "~/.config")).expanduser() / "ffinfo-cli"
+DATA_DIR   = Path(os.environ.get("XDG_DATA_HOME", "~/.local/share")).expanduser() / "ffinfo-cli"
 ```
 
 ---
@@ -192,9 +192,21 @@ struct HistoryRecord {
 - 本地有 `syncChangeCounter` 追踪本地改动
 - 有 **backoff** 机制，服务器会要求你退避
 
-### 3.7 ❌ `forms` collection 已死（已定案）
+### 3.7 ❌ `forms` collection 已死（已定案）—— 但服务器上还躺着记录
 
 **结论：现代 Firefox Sync 不同步表单历史。`forms` 是遗留的引擎名，没有实现。**
+
+> **2026-09-14 实测补记 —— 把话说准**
+>
+> `/info/collection_counts` 显示测试账号的 `forms` 上有 **42768 条**记录，
+> 全账号第二多（仅次于 history 的 4890）。所以**死的是引擎，不是数据**：
+> 记录还躺在 Mozilla 服务器上，只是 2019 年前后再没有任何客户端去同步它。
+>
+> ⚠️ **本项目的决定：不拉 `forms`，一条都不拉。**
+> 这批记录是遗留物，内容无从考证，而老 Firefox 的表单历史里可能混着
+> 当年在网页表单里填过的敏感内容（**包括密码**）。
+> 来历不明的东西不碰 —— 宁可漏，不可错。代码层面见
+> `ffinfo_cli/sync.py` 的 `SYNCABLE_COLLECTIONS` 白名单。
 
 四条证据链：
 
@@ -217,6 +229,11 @@ struct HistoryRecord {
 **表单的两条出路**（首版选 A）：
 - **A（推荐）**：降级跳过。表单只有本地源有（`formhistory.sqlite`），会让"双源"模型出现单边特例
 - **B（进 TODO）**：本地通道加一个 `formhistory.sqlite` 读取器
+
+> **云端 `forms` 和本地 `formhistory.sqlite` 是两回事，别混**：
+> 云端那 42768 条遗留记录**永远不拉**，白名单已经把它挡在门外；
+> 这里说的 A / B 是**本地**那个文件要不要读 —— 那是用户自己机器上的文件，来源清楚，
+> 将来想做还能做。
 
 ### 3.8 生态现状
 

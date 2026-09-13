@@ -41,9 +41,9 @@ def test_paths_follow_xdg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
 
-    assert identity_path() == tmp_path / "cfg" / "ffinfo_cli" / "age-key.txt"
-    assert credentials_path() == tmp_path / "data" / "ffinfo_cli" / "credentials.age"
-    assert data_dir() == tmp_path / "data" / "ffinfo_cli"
+    assert identity_path() == tmp_path / "cfg" / "ffinfo-cli" / "age-key.txt"
+    assert credentials_path() == tmp_path / "data" / "ffinfo-cli" / "credentials.age"
+    assert data_dir() == tmp_path / "data" / "ffinfo-cli"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="只有 Windows 才有 %APPDATA%")
@@ -51,8 +51,8 @@ def test_paths_use_appdata_on_windows(monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
 
-    assert identity_path() == tmp_path / "roaming" / "ffinfo_cli" / "age-key.txt"
-    assert credentials_path() == tmp_path / "local" / "ffinfo_cli" / "credentials.age"
+    assert identity_path() == tmp_path / "roaming" / "ffinfo-cli" / "age-key.txt"
+    assert credentials_path() == tmp_path / "local" / "ffinfo-cli" / "credentials.age"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="XDG 是 POSIX 的约定")
@@ -60,8 +60,8 @@ def test_paths_fall_back_to_home(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.delenv("XDG_DATA_HOME", raising=False)
 
-    assert identity_path() == Path.home() / ".config" / "ffinfo_cli" / "age-key.txt"
-    assert credentials_path() == Path.home() / ".local" / "share" / "ffinfo_cli" / "credentials.age"
+    assert identity_path() == Path.home() / ".config" / "ffinfo-cli" / "age-key.txt"
+    assert credentials_path() == Path.home() / ".local" / "share" / "ffinfo-cli" / "credentials.age"
 
 
 # ── login 的整条编排 ─────────────────────────────────────────────────────
