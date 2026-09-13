@@ -18,6 +18,7 @@ from ffinfo_cli import __version__
 from ffinfo_cli.list import list_blocking, parse_since
 from ffinfo_cli.login import login_sync
 from ffinfo_cli.paths import credentials_path, database_path, identity_path
+from ffinfo_cli.progress import reporter_for
 from ffinfo_cli.sync import sync_blocking
 from ffinfo_cli.transfer import export_blocking, import_blocking
 
@@ -91,8 +92,15 @@ def sync(
         "--full",
         help="强制全量重拉（对账用：服务器会清掉很老的墓碑，只有全量才发现那部分删除）",
     ),
+    progress: bool = typer.Option(
+        True, "--progress/--no-progress", help="要不要在 stderr 上显示拉到第几页了"
+    ),
 ) -> None:
-    """从 Firefox Sync 拉取数据并落盘。默认只拉上次同步之后的变更。"""
+    """从 Firefox Sync 拉取数据并落盘。默认只拉上次同步之后的变更。
+
+    进度走 **stderr**，stdout 上仍然只有那份 JSON。
+    """
+    reporter = reporter_for(sys.stderr, enabled=progress)
     try:
         report = sync_blocking(
             identity_path=identity_path(),
@@ -101,6 +109,7 @@ def sync(
             collection=collection,
             page_size=page_size,
             full=full,
+            on_progress=reporter,
         )
     except BackoffError as exc:
         scheme = "X-Weave-Backoff" if exc.soft else "Retry-After"
@@ -112,6 +121,9 @@ def sync(
     except FfinfoError as exc:
         typer.echo(f"同步失败：{exc}", err=True)
         raise typer.Exit(code=1) from exc
+    finally:
+        if reporter is not None:
+            reporter.finish()
 
     typer.echo(report.to_json())
 

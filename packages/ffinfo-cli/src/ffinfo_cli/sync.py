@@ -24,7 +24,12 @@ from ffinfo.credentials import AgeIdentity, CredentialStore
 from ffinfo.errors import ConfigurationError
 from ffinfo.keys import OLD_SYNC_SCOPE
 from ffinfo.oauth import Credentials
-from ffinfo.storage import MOZILLA_TOKEN_SERVER, CollectionFetch, SyncStorageClient
+from ffinfo.storage import (
+    MOZILLA_TOKEN_SERVER,
+    CollectionFetch,
+    FetchProgress,
+    SyncStorageClient,
+)
 from ffinfo_cli.store import (
     CollectionBatch,
     SyncRecord,
@@ -100,6 +105,7 @@ async def run_sync(
     database_path: Path,
     collection: str,
     http: httpx.AsyncClient,
+    on_progress: Callable[[FetchProgress], None] | None = None,
     page_size: int = 100,
     full: bool = False,
     clock: Callable[[], float] = time.time,
@@ -146,7 +152,9 @@ async def run_sync(
     for name in targets:
         cursor = None if full else await load_cursor(engine, name)
         cursors[name] = cursor
-        fetch = await client.fetch_collection(name, page_size=page_size, newer=cursor)
+        fetch = await client.fetch_collection(
+            name, page_size=page_size, newer=cursor, on_progress=on_progress
+        )
         fetches[name] = fetch
         batches.append(CollectionBatch(collection=name, records=fetch.records, full=cursor is None))
 
@@ -197,8 +205,12 @@ def sync_blocking(
     collection: str,
     page_size: int = 100,
     full: bool = False,
+    on_progress: Callable[[FetchProgress], None] | None = None,
 ) -> SyncReport:
-    """:func:`run_sync` 的同步外壳：自己开 HTTP 客户端。"""
+    """:func:`run_sync` 的同步外壳：自己开 HTTP 客户端。
+
+    ``on_progress`` 一路透传到 HTTP 客户端 —— 命令行那层靠它显示"拉到第几页了"。
+    """
 
     async def _main() -> SyncReport:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as http:
@@ -210,6 +222,7 @@ def sync_blocking(
                 http=http,
                 page_size=page_size,
                 full=full,
+                on_progress=on_progress,
             )
 
     return asyncio.run(_main())

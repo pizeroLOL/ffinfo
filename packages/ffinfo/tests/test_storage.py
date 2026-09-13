@@ -19,6 +19,7 @@ from ffinfo.errors import BackoffError, SyncProtocolError
 from ffinfo.storage import (
     BackoffState,
     EncryptedBso,
+    FetchProgress,
     HawkCredentials,
     SyncStorageClient,
     _normalized_request,
@@ -705,3 +706,57 @@ def test_encrypted_bso_ignores_unknown_fields() -> None:
         {"id": "a", "modified": 1.0, "payload": "x", "sortindex": 5, "ttl": 60, "future": True}
     )
     assert record.sortindex == 5
+
+
+# ── 翻页进度（12 号 ticket） ──────────────────────────────────────────────
+
+
+async def test_progress_callback_fires_once_per_page() -> None:
+    """每翻完一页报一次 —— 命令行那层才有东西可显示。
+
+    库只管**报事实**（第几页、多少条）；"怎么显示、显示不显示"是调用方的事
+    （``docs/design.md`` §2.5 的老规矩：库不替应用做决定）。
+    """
+    fake = FakeSync()
+    fake.counts = {"history": 3}
+    fake.pages = [
+        page([bso("a")], next_offset="O1"),
+        page([bso("b")], next_offset="O2"),
+        page([bso("c")]),
+    ]
+    seen: list[FetchProgress] = []
+
+    result = await fake.client().fetch_collection("history", on_progress=seen.append)
+
+    assert result.pages == 3
+    assert [(item.pages, item.records) for item in seen] == [(1, 1), (2, 2), (3, 3)]
+    assert {item.collection for item in seen} == {"history"}
+
+
+async def test_progress_is_optional() -> None:
+    """不给回调就照常拉 —— 进度是锦上添花，不是必经之路。"""
+    fake = FakeSync()
+    fake.counts = {"history": 1}
+    fake.pages = [page([bso("a")])]
+
+    result = await fake.client().fetch_collection("history")
+
+    assert result.count == 1
+
+
+async def test_progress_reports_after_a_retry_not_before() -> None:
+    """412 重试时，进度报的是**这一趟**翻了几页 —— 不把上一趟的页数累进去。"""
+    fake = FakeSync()
+    fake.counts = {"history": 2}
+    fake.pages = [
+        page([bso("a")], next_offset="O1"),
+        httpx.Response(412),
+        page([bso("a")], next_offset="O1"),
+        page([bso("b")]),
+    ]
+    seen: list[FetchProgress] = []
+
+    result = await fake.client().fetch_collection("history", on_progress=seen.append)
+
+    assert result.count == 2
+    assert [(item.pages, item.records) for item in seen] == [(1, 1), (1, 1), (2, 2)]

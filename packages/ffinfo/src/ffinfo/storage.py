@@ -36,6 +36,7 @@ __all__ = [
     "BackoffState",
     "CollectionFetch",
     "EncryptedBso",
+    "FetchProgress",
     "HawkCredentials",
     "SyncStorageClient",
     "TokenserverToken",
@@ -225,6 +226,20 @@ class CollectionFetch:
         return len(self.records)
 
 
+@dataclass(frozen=True, slots=True)
+class FetchProgress:
+    """翻页进度 —— **每翻完一页报一次**。
+
+    只报事实（哪个 collection、第几页、累计多少条），不掺时间也不掺显示 ——
+    "用时多久""要不要刷同一行"都是调用方的事（``docs/design.md`` §2.5 的老规矩：
+    库不替应用做决定，时钟与输出都由外面注入）。
+    """
+
+    collection: str
+    pages: int
+    records: int
+
+
 class _CollectionChanged(Exception):
     """读到一半集合被改了（412）。内部信号，外面看到的是 :class:`SyncProtocolError`。"""
 
@@ -341,6 +356,7 @@ class SyncStorageClient:
         retries: int = 3,
         verify_count: bool = True,
         newer: float | None = None,
+        on_progress: Callable[[FetchProgress], None] | None = None,
     ) -> CollectionFetch:
         """拉一个 collection 的记录，自动翻页。
 
@@ -353,6 +369,9 @@ class SyncStorageClient:
         ``verify_count=True`` 时拉完会和服务器报告的条数对一下 —— 但**只在全量时**才有意义：
         增量拉回来的只是变更集，条数本来就对不上整个 collection。
         所以 ``newer`` 给了的时候这个开关会被自动关掉。
+
+        ``on_progress`` 给了就每翻完一页调一次（全量拉 50 页时，调用方靠它知道
+        自己不是在等一个卡死的进程）。它**只读不写**，返回值一概不管。
 
         返回的记录**未经解密**。
         """
@@ -369,6 +388,7 @@ class SyncStorageClient:
                     sort=sort,
                     server_count=server_count,
                     newer=newer,
+                    on_progress=on_progress,
                 )
             except _CollectionChanged as exc:
                 if attempt < retries:
@@ -399,6 +419,7 @@ class SyncStorageClient:
         sort: str | None,
         server_count: int | None,
         newer: float | None = None,
+        on_progress: Callable[[FetchProgress], None] | None = None,
     ) -> CollectionFetch:
         """真正翻页的那个循环。集合中途被改会抛 :class:`_CollectionChanged` 让上层重试。"""
         token = await self.token()
@@ -430,6 +451,9 @@ class SyncStorageClient:
             last_modified = _required_last_modified(response)
             records.extend(_records_from_json(response, collection))
             pages += 1
+            if on_progress is not None:
+                # 报的是**这一趟**的累计数 —— 412 重试会从头开始，不把上一趟的算进来
+                on_progress(FetchProgress(collection=collection, pages=pages, records=len(records)))
 
             offset = response.headers.get("X-Weave-Next-Offset") or None
             if offset is None:
