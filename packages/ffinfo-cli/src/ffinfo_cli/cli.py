@@ -101,6 +101,12 @@ def sync(
 
 @app.command(name="list")
 def list_command(
+    data_type: str = typer.Option(
+        "history",
+        "--data-type",
+        "-t",
+        help="看哪一种：history（一次访问一行）/ bookmarks（树）/ tabs（按设备分组）",
+    ),
     since: str | None = typer.Option(
         None,
         "--since",
@@ -112,12 +118,13 @@ def list_command(
     ),
     limit: int | None = typer.Option(None, "--limit", "-n", help="最多返回多少条，最新的优先"),
 ) -> None:
-    """把库里的浏览历史解密后输出 JSON。纯本地，不联网。"""
+    """把库里的浏览数据解密后输出 JSON。纯本地，不联网。"""
     try:
         report = list_blocking(
             identity_path=identity_path(),
             credentials_path=credentials_path(),
             database_path=database_path(),
+            data_type=data_type,
             since=parse_since(since) if since is not None else None,
             domain=domain,
             search=search,

@@ -19,7 +19,7 @@ from ffinfo.errors import ConfigurationError
 from ffinfo.keys import OLD_SYNC_SCOPE, ScopedKey
 from ffinfo.oauth import Credentials
 from ffinfo.storage import EncryptedBso
-from ffinfo_cli.list import apply_filters, matches_domain, parse_since, run_list
+from ffinfo_cli.list import matches_domain, matches_search, parse_since, run_list
 from ffinfo_cli.store import CollectionBatch, open_database, store_batches
 
 KSYNC = bytes(range(64))
@@ -398,12 +398,9 @@ def test_matches_domain(url: str, domain: str, expected: bool) -> None:
     assert matches_domain(url, domain) is expected
 
 
-def test_apply_filters_with_no_filters_keeps_everything() -> None:
-    from ffinfo.history import HistoryEntry
-
-    entries = [
-        HistoryEntry("a", "https://a.test/", "A", DAY, 1, "link"),
-        HistoryEntry("b", "https://b.test/", "B", DAY + timedelta(hours=1), 1, "link"),
-    ]
-
-    assert [entry.record_id for entry in apply_filters(entries)] == ["b", "a"]
+def test_matches_search_covers_several_fields_case_insensitively() -> None:
+    """搜索同时看标题和 URL —— 哪个命中都算。"""
+    assert matches_search("Rust 学习笔记", "https://x.test/", needle="RUST")
+    assert matches_search("标题", "https://rust-lang.org/", needle="rust")
+    assert not matches_search("别的", "https://x.test/", needle="rust")
+    assert not matches_search(None, None, needle="rust")

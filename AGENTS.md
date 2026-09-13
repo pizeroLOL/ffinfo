@@ -45,8 +45,10 @@ uv run prek install                       # 装 git 钩子
       model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
       id: str
 
+
   class Client:
       __slots__: tuple[str, ...] = ("_http",)
+
 
   class Row(Table):
       collection: Varchar = Varchar(length=64, index=True)
