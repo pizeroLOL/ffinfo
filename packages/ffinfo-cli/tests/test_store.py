@@ -6,8 +6,9 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -230,8 +231,10 @@ async def test_record_identity_is_enforced_by_the_database(tmp_path: Path) -> No
         )
 
 
-async def test_old_databases_with_duplicate_rows_are_repaired(tmp_path: Path) -> None:
-    """早期版本写出来的库里可能躺着重复行 —— 开库时收敛，保留 modified 最新的一条。"""
+async def test_old_databases_with_duplicate_rows_are_repaired(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """早期版本写出来的库里可能躺着重复行 —— 开库时收敛，**并且喊一声**。"""
     path = tmp_path / "old.sqlite"
     connection = sqlite3.connect(path)
     connection.executescript(
@@ -261,15 +264,25 @@ async def test_old_databases_with_duplicate_rows_are_repaired(tmp_path: Path) ->
         ("history", "a", "new"),
         ("bookmarks", "a", "other"),
     ]
+    assert "1 条重复记录" in capsys.readouterr().err
 
 
-class _FailsMidway(Sequence[EncryptedBso]):
+async def test_clean_databases_do_not_warn(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """没重复就别吓人 —— 建过索引之后也不会再查。"""
+    path = tmp_path / "db.sqlite"
+
+    await open_database(path)
+    await open_database(path)
+
+    assert capsys.readouterr().err == ""
+
+
+class _FailsMidway:
     """读到一半就炸的 records —— 模拟第二个 batch 写到一半出事。"""
 
-    def __len__(self) -> int:
-        return 1
-
-    def __getitem__(self, index: int) -> EncryptedBso:
+    def __iter__(self) -> Iterator[EncryptedBso]:
         msg = "磁盘满了"
         raise RuntimeError(msg)
 
@@ -283,7 +296,11 @@ async def test_store_batches_rolls_back_when_a_later_batch_fails(tmp_path: Path)
             engine,
             [
                 CollectionBatch(collection="bookmarks", records=[record("keep")], full=True),
-                CollectionBatch(collection="history", records=_FailsMidway(), full=True),
+                CollectionBatch(
+                    collection="history",
+                    records=cast(Sequence[EncryptedBso], _FailsMidway()),
+                    full=True,
+                ),
             ],
         )
 

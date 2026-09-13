@@ -445,5 +445,5 @@ cd application-services && git sparse-checkout set components/places components/
 |---|---|---|
 | A | 如果 `forms` 确认已死 —— 降级跳过，还是另想办法？ | ❓ |
 | B | `research/` 的 47M 克隆 —— 开工后保留还是删除？ | ❓ |
-| C | **pyright 实际在空跑**：`include = ["packages/*/src", …]` 这种通配 pyright 不认，`filesAnalyzed: 0`，所以历史上所有「0 errors」都是空的。写死目录真跑一遍：src 共 89 条 —— pyrage 无存根 43 · piccolo 无存根 32 · httpx / pydantic 的写法导致的假阳性 8 · 零散 6，**没有一条是真错**。修法二选一：给 unknown 系列按文件开豁免（快、strict 打折），或补依赖存根（治本、活多）。不管哪条，`include` 该先修 | ❓ |
+| C | **pyright 修法** | ✅ **已拍板（2026-09-14）**：**先豁免** unknown 系列（`reportUnknown*` + `reportAttributeAccessIssue`），把"自己写的类型"这层检查保住；`include` 的通配已修，检查器真的在跑（52 个文件 / 0 errors）。补依赖存根（pyrage / piccolo）记进待办，补完把豁免开回来 |
 | D | Python 版本策略：现在 `requires-python = ">=3.14"` 且真用了 PEP 758。库的卖点是「官方客户端归档后市面唯一替代品」—— 锁死在 3.14 等于掐死卖点；放宽要改写那处语法 | ❓ |

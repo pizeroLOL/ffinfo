@@ -19,7 +19,7 @@ from ffinfo.errors import ConfigurationError
 from ffinfo.keys import OLD_SYNC_SCOPE, ScopedKey
 from ffinfo.oauth import Credentials
 from ffinfo.storage import EncryptedBso
-from ffinfo_cli.list import matches_domain, matches_search, parse_since, run_list
+from ffinfo_cli.list import ListReport, matches_domain, matches_search, parse_since, run_list
 from ffinfo_cli.store import (
     CollectionBatch,
     StoredVisit,
@@ -188,7 +188,7 @@ async def build_db(
     await store_batches(engine, batches)
 
 
-async def run(tmp_path: Path, **kwargs: object) -> object:
+async def run(tmp_path: Path, **kwargs: object) -> ListReport:
     identity_path, credentials_path = write_credentials(tmp_path)
     return await run_list(
         identity_path=identity_path,
@@ -212,7 +212,7 @@ async def test_lists_visits_newest_first(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(tmp_path)  # type: ignore[assignment]
+    report = await run(tmp_path)
 
     assert [item.url for item in report.items] == ["https://new.test/", "https://old.test/"]
     assert report.items[0].visit_type_name == "typed"
@@ -232,7 +232,7 @@ async def test_one_record_with_many_visits_becomes_many_rows(tmp_path: Path) -> 
         ],
     )
 
-    report = await run(tmp_path)  # type: ignore[assignment]
+    report = await run(tmp_path)
 
     assert report.records == 1
     assert report.visits == 3
@@ -242,7 +242,7 @@ async def test_one_record_with_many_visits_becomes_many_rows(tmp_path: Path) -> 
 async def test_timestamps_are_utc_iso(tmp_path: Path) -> None:
     await build_db(tmp_path, [history_record("rec", visits=[(DAY, 1)])])
 
-    report = await run(tmp_path)  # type: ignore[assignment]
+    report = await run(tmp_path)
 
     assert report.items[0].visited_at == "2026-09-13T12:00:00+00:00"
 
@@ -251,7 +251,7 @@ async def test_output_carries_format_version_and_filters(tmp_path: Path) -> None
     """给 agent 的接口要能演进 —— 版本号必须在。"""
     await build_db(tmp_path, [history_record("rec")])
 
-    report = await run(tmp_path, domain="example.com")  # type: ignore[assignment]
+    report = await run(tmp_path, domain="example.com")
     payload = json.loads(report.to_json())
 
     assert "format_version" in payload
@@ -268,7 +268,7 @@ async def test_tombstones_are_not_listed(tmp_path: Path) -> None:
         [history_record("alive"), EncryptedBso(id="gone", modified=2.0, payload=None)],
     )
 
-    report = await run(tmp_path)  # type: ignore[assignment]
+    report = await run(tmp_path)
 
     assert [item.record_id for item in report.items] == ["alive"]
     assert report.skipped == 0
@@ -293,7 +293,7 @@ async def test_broken_record_is_skipped_and_counted(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(tmp_path)  # type: ignore[assignment]
+    report = await run(tmp_path)
 
     assert len(report.items) == 2
     assert report.skipped == 1
@@ -345,7 +345,7 @@ async def test_since_filter(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(tmp_path, since=DAY + timedelta(days=1))  # type: ignore[assignment]
+    report = await run(tmp_path, since=DAY + timedelta(days=1))
 
     assert [item.record_id for item in report.items] == ["new"]
     assert report.visits == 2  # 过滤前还是两条
@@ -363,9 +363,12 @@ async def test_domain_filter_includes_subdomains(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(tmp_path, domain="example.com")  # type: ignore[assignment]
+    report = await run(tmp_path, domain="example.com")
 
-    assert sorted(item.record_id for item in report.items) == ["apex", "sub"]
+    assert sorted(item.record_id for item in report.items if item.record_id is not None) == [
+        "apex",
+        "sub",
+    ]
 
 
 async def test_search_filter_covers_title_and_url_case_insensitively(tmp_path: Path) -> None:
@@ -378,9 +381,12 @@ async def test_search_filter_covers_title_and_url_case_insensitively(tmp_path: P
         ],
     )
 
-    report = await run(tmp_path, search="RUST")  # type: ignore[assignment]
+    report = await run(tmp_path, search="RUST")
 
-    assert sorted(item.record_id for item in report.items) == ["bytitle", "byurl"]
+    assert sorted(item.record_id for item in report.items if item.record_id is not None) == [
+        "bytitle",
+        "byurl",
+    ]
 
 
 async def test_limit_caps_but_reports_the_full_match(tmp_path: Path) -> None:
@@ -390,7 +396,7 @@ async def test_limit_caps_but_reports_the_full_match(tmp_path: Path) -> None:
         [history_record(f"rec{i}", visits=[(DAY + timedelta(minutes=i), 1)]) for i in range(5)],
     )
 
-    report = await run(tmp_path, limit=2)  # type: ignore[assignment]
+    report = await run(tmp_path, limit=2)
 
     assert report.returned == 2
     assert report.matched == 5
@@ -419,7 +425,7 @@ async def test_filters_combine(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(  # type: ignore[assignment]
+    report = await run(
         tmp_path, domain="example.com", since=DAY + timedelta(hours=6), search="keep"
     )
 
@@ -499,7 +505,7 @@ async def test_local_source_alone_is_usable(tmp_path: Path) -> None:
     await build_db(tmp_path, [])
     await add_local(tmp_path, [local_visit("https://local.test/")])
 
-    report = await run(tmp_path)  # type: ignore[assignment]
+    report = await run(tmp_path)
 
     assert [item.url for item in report.items] == ["https://local.test/"]
     assert report.items[0].source == "local"
@@ -510,7 +516,7 @@ async def test_sync_source_alone_still_works(tmp_path: Path) -> None:
     """**降级到单源**：一台没导入过任何本地数据的机器，查询照常。"""
     await build_db(tmp_path, [history_record("rec", url="https://cloud.test/")])
 
-    report = await run(tmp_path)  # type: ignore[assignment]
+    report = await run(tmp_path)
 
     assert [item.url for item in report.items] == ["https://cloud.test/"]
     assert report.items[0].source == "sync"
@@ -528,7 +534,7 @@ async def test_the_same_visit_from_both_sources_is_one_row(tmp_path: Path) -> No
     await build_db(tmp_path, [history_record("rec", url="https://both.test/", visits=[(DAY, 1)])])
     await add_local(tmp_path, [local_visit("https://both.test/", when=DAY)])
 
-    report = await run(tmp_path)  # type: ignore[assignment]
+    report = await run(tmp_path)
 
     assert report.returned == 1
     assert report.items[0].source == "both"
@@ -541,7 +547,7 @@ async def test_a_different_visit_at_the_same_url_is_a_second_row(tmp_path: Path)
     await build_db(tmp_path, [history_record("rec", url="https://both.test/", visits=[(DAY, 1)])])
     await add_local(tmp_path, [local_visit("https://both.test/", when=DAY + timedelta(minutes=30))])
 
-    report = await run(tmp_path)  # type: ignore[assignment]
+    report = await run(tmp_path)
 
     assert report.returned == 2
     assert [item.source for item in report.items] == ["local", "sync"]
@@ -563,7 +569,7 @@ async def test_merged_rows_stay_newest_first(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(tmp_path)  # type: ignore[assignment]
+    report = await run(tmp_path)
 
     assert [item.url for item in report.items] == [
         "https://b.test/",
@@ -577,7 +583,7 @@ async def test_sources_field_says_what_contributed(tmp_path: Path) -> None:
     await build_db(tmp_path, [history_record("rec")])
     await add_local(tmp_path, [local_visit()])
 
-    report = await run(tmp_path)  # type: ignore[assignment]
+    report = await run(tmp_path)
 
     assert report.sources == ["sync", "local"]
     assert report.local_records == 1
@@ -596,9 +602,7 @@ async def test_local_visits_go_through_the_same_filters(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(  # type: ignore[assignment]
-        tmp_path, domain="wanted.test", since=DAY - timedelta(days=1)
-    )
+    report = await run(tmp_path, domain="wanted.test", since=DAY - timedelta(days=1))
 
     assert [item.url for item in report.items] == ["https://wanted.test/page"]
 
@@ -611,7 +615,7 @@ async def test_local_visit_borrows_the_sync_title_when_it_has_none(tmp_path: Pat
     )
     await add_local(tmp_path, [local_visit("https://both.test/", when=DAY, title="")])
 
-    report = await run(tmp_path)  # type: ignore[assignment]
+    report = await run(tmp_path)
 
     assert report.items[0].title == "云端标题"
 
@@ -620,7 +624,7 @@ async def test_format_version_bumped_for_the_new_shape(tmp_path: Path) -> None:
     """输出多了 source / source_machine、record_id 也可能为 null —— 形状变了就得报。"""
     await build_db(tmp_path, [history_record("rec")])
 
-    report = await run(tmp_path)  # type: ignore[assignment]
+    report = await run(tmp_path)
 
     assert report.format_version == 2
 
@@ -629,7 +633,7 @@ async def test_json_shape_of_a_merged_row(tmp_path: Path) -> None:
     await build_db(tmp_path, [history_record("rec", url="https://both.test/", visits=[(DAY, 1)])])
     await add_local(tmp_path, [local_visit("https://both.test/", when=DAY)])
 
-    report = await run(tmp_path)  # type: ignore[assignment]
+    report = await run(tmp_path)
     payload = json.loads(report.to_json())
 
     assert payload["sources"] == ["sync", "local"]
@@ -659,7 +663,7 @@ async def test_bookmarks_keep_the_tree(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(tmp_path, data_type="bookmarks")  # type: ignore[assignment]
+    report = await run(tmp_path, data_type="bookmarks")
 
     assert [node.id for node in report.tree] == ["folder"]
     assert report.tree[0].children[0].id == "bmk"
@@ -679,7 +683,7 @@ async def test_bookmark_limit_counts_bookmarks_not_folders(tmp_path: Path) -> No
         ],
     )
 
-    report = await run(tmp_path, data_type="bookmarks", limit=1)  # type: ignore[assignment]
+    report = await run(tmp_path, data_type="bookmarks", limit=1)
 
     assert report.returned == 1
     assert [node.id for node in report.tree] == ["folder"]
@@ -701,7 +705,7 @@ async def test_bookmark_filters_prune_empty_folders(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(tmp_path, data_type="bookmarks", domain="rust-lang.org")  # type: ignore[assignment]
+    report = await run(tmp_path, data_type="bookmarks", domain="rust-lang.org")
 
     assert report.returned == 1
     assert report.matched == 1
@@ -721,7 +725,7 @@ async def test_bookmark_limit_uses_the_budget_on_bookmarks(tmp_path: Path) -> No
         ],
     )
 
-    report = await run(tmp_path, data_type="bookmarks", limit=2)  # type: ignore[assignment]
+    report = await run(tmp_path, data_type="bookmarks", limit=2)
 
     assert report.returned == 2
     assert report.matched == 2
@@ -739,7 +743,7 @@ async def test_bookmark_cycles_reach_the_report_as_skipped(tmp_path: Path) -> No
         ],
     )
 
-    report = await run(tmp_path, data_type="bookmarks")  # type: ignore[assignment]
+    report = await run(tmp_path, data_type="bookmarks")
 
     assert report.tree == []
     assert report.skipped == 2
@@ -756,7 +760,7 @@ async def test_bookmark_json_is_serializable_with_iso_times(tmp_path: Path) -> N
         ],
     )
 
-    report = await run(tmp_path, data_type="bookmarks")  # type: ignore[assignment]
+    report = await run(tmp_path, data_type="bookmarks")
     payload = json.loads(report.to_json())
 
     assert payload["tree"][0]["children"][0]["added_at"] == "2026-09-13T12:00:00+00:00"
@@ -775,7 +779,7 @@ async def test_tabs_are_grouped_by_client(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(tmp_path, data_type="tabs")  # type: ignore[assignment]
+    report = await run(tmp_path, data_type="tabs")
 
     assert [client.client_name for client in report.clients] == ["alpha", "beta"]
     assert report.returned == 2
@@ -796,7 +800,7 @@ async def test_tabs_limit_counts_tabs_not_clients(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(tmp_path, data_type="tabs", limit=2)  # type: ignore[assignment]
+    report = await run(tmp_path, data_type="tabs", limit=2)
 
     assert report.matched == 3
     assert report.returned == 2
@@ -819,7 +823,7 @@ async def test_bookmark_since_filter_compares_real_times(tmp_path: Path) -> None
         ],
     )
 
-    report = await run(tmp_path, data_type="bookmarks", since=DAY)  # type: ignore[assignment]
+    report = await run(tmp_path, data_type="bookmarks", since=DAY)
 
     assert [node.id for node in report.tree] == ["new"]
     assert report.returned == 1
@@ -842,7 +846,7 @@ async def test_tabs_since_filter_compares_real_times(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(tmp_path, data_type="tabs", since=DAY)  # type: ignore[assignment]
+    report = await run(tmp_path, data_type="tabs", since=DAY)
 
     assert [tab.title for tab in report.clients[0].tabs] == ["新"]
     assert report.returned == 1
@@ -859,7 +863,7 @@ async def test_tabs_json_is_serializable_with_iso_times(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(tmp_path, data_type="tabs")  # type: ignore[assignment]
+    report = await run(tmp_path, data_type="tabs")
     payload = json.loads(report.to_json())
 
     assert payload["clients"][0]["tabs"][0]["last_used_at"] == "2023-11-14T22:13:20+00:00"

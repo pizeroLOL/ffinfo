@@ -26,6 +26,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from ffinfo.credentials import AgeIdentity
 from ffinfo.errors import AuthError
+from ffinfo.oauth import Credentials
 from ffinfo_cli.login import run_login
 from vectors import SCOPED_KEY
 
@@ -80,17 +81,15 @@ def _token_handler(receiver: _FakeReceiver) -> Callable[[httpx.Request], httpx.R
     return handler
 
 
-async def _login(tmp_path: Path, receiver: _FakeReceiver, **overrides) -> object:
+async def _login(tmp_path: Path, receiver: _FakeReceiver) -> Credentials:
     http = httpx.AsyncClient(transport=httpx.MockTransport(_token_handler(receiver)))
-    params = {
-        "identity_path": tmp_path / "age-key.txt",
-        "credentials_path": tmp_path / "credentials.age",
-        "receiver": receiver,
-        "http": http,
-        "now": 1_000.0,
-    }
-    params.update(overrides)
-    return await run_login(**params)
+    return await run_login(
+        identity_path=tmp_path / "age-key.txt",
+        credentials_path=tmp_path / "credentials.age",
+        receiver=receiver,
+        http=http,
+        now=1_000.0,
+    )
 
 
 async def test_login_derives_the_sync_key_bundle(tmp_path: Path) -> None:

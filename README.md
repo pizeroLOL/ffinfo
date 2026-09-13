@@ -67,8 +67,8 @@ uv run prek install                       # 装 git 钩子
 
 > `pyright` 要带 `--project pyproject.toml` —— 它会向上遍历目录找祖先里的
 > `pyrightconfig.json` 并优先用那个。细节见 [`AGENTS.md`](AGENTS.md)。
-> ⚠️ 目前它实际分析 **0 个文件**（`include` 里的通配 pyright 不认），「0 errors」是空的
-> —— 别拿它当类型安全的证据。修法见 [`docs/design.md`](docs/design.md) §8。
+> 依赖没有类型信息的部分（pyrage / piccolo）目前**豁免**了 unknown 系列，见
+> [`pyproject.toml`](pyproject.toml) 里的注释与 [`docs/design.md`](docs/design.md) §8。
 
 > 依赖默认从 **PyPI** 装。国内网络想显著加速，设一个环境变量即可（别提交到仓库）：
 > `export UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple/`

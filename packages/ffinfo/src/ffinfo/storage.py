@@ -24,6 +24,7 @@ import secrets
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from http import HTTPStatus
 from typing import Any, ClassVar, Final
 
 import httpx
@@ -318,7 +319,7 @@ class SyncStorageClient:
                 "X-KeyID": self._key_id,
             },
         )
-        if response.status_code != httpx.codes.OK:
+        if response.status_code != HTTPStatus.OK:
             msg = (
                 f"tokenserver 拒绝了这次请求（HTTP {response.status_code}）："
                 f"{_body_snippet(response)}"
@@ -340,7 +341,7 @@ class SyncStorageClient:
         token = await self.token()
         url = _endpoint_url(token.api_endpoint, "info/collection_counts")
         response = await self._authorized_get(url)
-        if response.status_code != httpx.codes.OK:
+        if response.status_code != HTTPStatus.OK:
             msg = (
                 f"拿不到 collection 计数（HTTP {response.status_code}）：{_body_snippet(response)}"
             )
@@ -439,9 +440,9 @@ class SyncStorageClient:
             )
             response = await self._authorized_get(url, if_unmodified_since=last_modified)
 
-            if response.status_code == httpx.codes.PRECONDITION_FAILED:
+            if response.status_code == HTTPStatus.PRECONDITION_FAILED:
                 raise _CollectionChanged
-            if response.status_code != httpx.codes.OK:
+            if response.status_code != HTTPStatus.OK:
                 msg = (
                     f"拉取 collection「{collection}」失败（HTTP {response.status_code}）："
                     f"{_body_snippet(response)}"
@@ -465,7 +466,8 @@ class SyncStorageClient:
         return CollectionFetch(
             collection=collection,
             records=tuple(records),
-            last_modified=last_modified if last_modified is not None else 0.0,
+            # while True 保证循环至少跑一轮、每轮都会赋值 —— 到这里它一定不是 None
+            last_modified=last_modified,
             pages=pages,
             server_count=server_count,
         )
@@ -478,7 +480,7 @@ class SyncStorageClient:
         """带 Hawk 签名的 GET。401 时换一个 token 再试一次（token 过期或节点重分配）。"""
         token = await self.token()
         response = await self._hawk_get(url, token, if_unmodified_since=if_unmodified_since)
-        if response.status_code != httpx.codes.UNAUTHORIZED:
+        if response.status_code != HTTPStatus.UNAUTHORIZED:
             return response
 
         fresh = await self.token(force=True)
@@ -528,7 +530,7 @@ class SyncStorageClient:
             raise SyncProtocolError(msg) from exc
 
         self._note_backoff(response)
-        if response.status_code in {httpx.codes.SERVICE_UNAVAILABLE, httpx.codes.CONFLICT}:
+        if response.status_code in {HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.CONFLICT}:
             self._raise_hard_backoff()
         return response
 

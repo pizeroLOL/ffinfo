@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -137,7 +138,8 @@ def _bind(engine: SQLiteEngine) -> None:
     测试才能各用各的临时库（见 ``tests/test_store.py``）。
     """
     for table in (LocalVisitRow, SyncRecord, SyncCursor):
-        table._meta.db = engine
+        # piccolo 没有"换绑数据库"的公开 API —— 只能碰类的 _meta
+        table._meta.db = engine  # pyright: ignore[reportPrivateUsage]
 
 
 async def open_database(path: Path) -> SQLiteEngine:
@@ -161,6 +163,7 @@ async def _enforce_record_identity(engine: SQLiteEngine) -> None:
     建过就不再动（检查只是一次 ``sqlite_master`` 查询，很便宜）。老库里如果躺着重复行
     （早期版本同一批里同 id 出现两次会插出两行），先收敛：每个
     ``(collection, record_id)`` 只保留 ``modified`` 最新的一条，同值留行号大的。
+    **收敛不是悄悄干的** —— 删了几条要报给用户（stderr，人看的通道）。
     """
     existing = await SyncRecord.raw(
         "SELECT name FROM sqlite_master WHERE type = 'index' AND name = {}",
@@ -168,6 +171,20 @@ async def _enforce_record_identity(engine: SQLiteEngine) -> None:
     )
     if existing:
         return
+    duplicates = await SyncRecord.raw(
+        "SELECT COUNT(*) AS folded FROM ("
+        "SELECT id, ROW_NUMBER() OVER ("
+        "PARTITION BY collection, record_id ORDER BY modified DESC, id DESC"
+        ") AS rank FROM sync_records"
+        ") WHERE rank > 1"
+    )
+    folded = int(duplicates[0]["folded"]) if duplicates else 0
+    if folded:
+        print(
+            f"警告：本地库里有 {folded} 条重复记录（同一个 collection + 同 id）—— "
+            f"已收敛，每个 id 只保留 modified 最新的一条。",
+            file=sys.stderr,
+        )
     await SyncRecord.raw(
         "DELETE FROM sync_records WHERE id IN ("
         "SELECT id FROM ("

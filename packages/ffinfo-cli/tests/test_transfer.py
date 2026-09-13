@@ -33,7 +33,13 @@ from ffinfo_cli.store import (
     open_database,
     store_batches,
 )
-from ffinfo_cli.transfer import export_blocking, import_blocking, run_export, run_import
+from ffinfo_cli.transfer import (
+    ExportReport,
+    export_blocking,
+    import_blocking,
+    run_export,
+    run_import,
+)
 from support import US, build_places
 from support import us_of as micros
 
@@ -56,7 +62,7 @@ def profile_with_firefox(home: Path, visits: list[tuple[str, str | None, int, in
 
 async def export_from(
     home: Path, destination: Path, *, database: Path | None = None, **kwargs: object
-) -> object:
+) -> ExportReport:
     return await run_export(
         database_path=database if database is not None else home / "ffinfo.sqlite",
         destination=destination,
@@ -81,7 +87,7 @@ async def test_export_reads_the_profile_and_writes_a_portable_file(tmp_path: Pat
         ],
     )
 
-    report = await export_from(home, tmp_path / "out" / "portable.sqlite")  # type: ignore[assignment]
+    report = await export_from(home, tmp_path / "out" / "portable.sqlite")
 
     portable = read_portable(tmp_path / "out" / "portable.sqlite")
     assert [item.url for item in portable.visits] == ["https://a.example/", "https://b.example/"]
@@ -118,7 +124,7 @@ async def test_export_works_without_any_local_database(tmp_path: Path) -> None:
     home = tmp_path / "home"
     profile_with_firefox(home, [("https://a.example/", "A", micros(DAY), 1)])
 
-    report = await export_from(home, tmp_path / "portable.sqlite")  # type: ignore[assignment]
+    report = await export_from(home, tmp_path / "portable.sqlite")
 
     portable = read_portable(tmp_path / "portable.sqlite")
     assert portable.records == ()
@@ -137,7 +143,7 @@ async def test_export_report_says_what_happened(tmp_path: Path) -> None:
     home = tmp_path / "home"
     profile_with_firefox(home, [("https://a.example/", "A", micros(DAY), 1)])
 
-    report = await export_from(home, tmp_path / "portable.sqlite")  # type: ignore[assignment]
+    report = await export_from(home, tmp_path / "portable.sqlite")
     payload = json.loads(report.to_json())
 
     assert payload["destination"].endswith("portable.sqlite")

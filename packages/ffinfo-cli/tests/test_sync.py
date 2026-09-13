@@ -18,7 +18,7 @@ from ffinfo.errors import BackoffError, ConfigurationError, SyncProtocolError
 from ffinfo.keys import OLD_SYNC_SCOPE, ScopedKey
 from ffinfo.oauth import Credentials
 from ffinfo_cli.store import SyncCursor, SyncRecord, load_cursor, open_database
-from ffinfo_cli.sync import SYNCABLE_COLLECTIONS, run_sync
+from ffinfo_cli.sync import SYNCABLE_COLLECTIONS, SyncReport, run_sync
 
 NOW = 1_789_320_612.0
 
@@ -122,7 +122,7 @@ async def sync(
     *,
     credentials: tuple[Path, Path] | None = None,
     **kwargs: Any,
-) -> Any:
+) -> SyncReport:
     """跑一次 sync，用假服务器。"""
     identity_path, credentials_path = credentials or write_credentials(tmp_path)
     return await run_sync(

@@ -15,6 +15,7 @@ import json
 import secrets
 from collections.abc import Sequence
 from dataclasses import dataclass
+from http import HTTPStatus
 from typing import ClassVar, Final, Protocol, Self
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -238,7 +239,7 @@ class OAuthClient:
             msg = f"连不上 Mozilla 的 token 端点：{exc}"
             raise AuthError(msg) from exc
 
-        if response.status_code != httpx.codes.OK:
+        if response.status_code != HTTPStatus.OK:
             raise AuthError(_describe_error(response))
 
         try:

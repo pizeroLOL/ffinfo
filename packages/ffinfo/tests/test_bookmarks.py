@@ -1,3 +1,6 @@
+# pyright: reportCallIssue=false
+# 上面这条：pydantic 的 populate_by_name 认不出来（它以为参数名是别名 parentid / dateAdded），
+# 这些模型在测试里就是按字段名构造的，运行时完全正常。
 """书签记录的解析与建树。
 
 密文用本库自己的加密方向现造（加密方向已由官方向量逐字节验过）。

@@ -31,8 +31,9 @@ uv run prek install                       # 装 git 钩子
 > 如果祖先目录里恰好有一个，裸跑 `pyright` 会去扫别人的代码。
 > 在干净的环境里裸跑没问题，但带上参数永远安全。
 >
-> ⚠️ **已知问题：这条命令目前实际分析 0 个文件**（`include` 里的通配 pyright 不认），
-> 所以「0 errors」是空的 —— 别拿它当类型安全的证据。修法见 `docs/design.md` §8。
+> 📌 `include` 里**不能写通配**（pyright 不认，会静默地一个文件都不分析）—— 写死目录。
+> 依赖没有类型信息带来的 unknown 系列（pyrage / piccolo）**已豁免**，见 `pyproject.toml`
+> 里的注释；补存根后把豁免开回来（记在待办里）。
 
 > **git 钩子用 [prek](https://github.com/j178/prek)** —— pre-commit 的 Rust 替代，
 > 读同一份 `.pre-commit-config.yaml`。ruff / ruff-format / pyright 都走 **local 钩子**：

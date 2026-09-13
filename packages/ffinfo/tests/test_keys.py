@@ -16,10 +16,13 @@ from vectors import CRYPTO_KEYS, SCOPED_KEY
 
 
 def _crypto_keys_payload() -> EncryptedPayload:
-    return EncryptedPayload(
-        iv=CRYPTO_KEYS.iv_b64,
-        hmac=CRYPTO_KEYS.hmac_hex,
-        ciphertext=CRYPTO_KEYS.ciphertext_b64,
+    # 按线上格式（别名）构造 —— pyright 认不出 populate_by_name，这样它才不吵
+    return EncryptedPayload.model_validate(
+        {
+            "IV": CRYPTO_KEYS.iv_b64,
+            "hmac": CRYPTO_KEYS.hmac_hex,
+            "ciphertext": CRYPTO_KEYS.ciphertext_b64,
+        }
     )
 
 

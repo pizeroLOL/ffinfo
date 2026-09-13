@@ -13,6 +13,8 @@ import hashlib
 import json
 import os
 import struct
+from collections.abc import Callable
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -40,7 +42,7 @@ SCOPE = "https://identity.mozilla.com/apps/oldsync"
 STATE = "b8f3a1c9d7e5"
 
 
-def _client(handler=None) -> OAuthClient:
+def _client(handler: Callable[[httpx.Request], httpx.Response] | None = None) -> OAuthClient:
     transport = httpx.MockTransport(handler or (lambda _: httpx.Response(500)))
     return OAuthClient(
         client_id=CLIENT_ID,
@@ -160,8 +162,8 @@ def test_callback_without_a_code_is_refused(url: str) -> None:
 # ── 用授权码换 token ──────────────────────────────────────────────────────
 
 
-def _token_response(**overrides) -> dict:
-    payload = {
+def _token_response(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
         "access_token": "access-token-abc",
         "token_type": "bearer",
         "scope": SCOPE,
@@ -174,7 +176,7 @@ def _token_response(**overrides) -> dict:
 
 
 async def test_exchange_code_posts_the_rfc6749_parameters() -> None:
-    seen: dict = {}
+    seen: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen["url"] = str(request.url)
@@ -351,7 +353,7 @@ def test_credentials_expiry_uses_the_injected_clock() -> None:
     assert credentials.is_expired(now=1_000.0 + 3_600)
 
 
-def test_credentials_can_be_vaulted_with_age(tmp_path) -> None:
+def test_credentials_can_be_vaulted_with_age(tmp_path: Path) -> None:
     """「换到的凭据按 02 的方式加密落盘」—— 03 和 02 串起来。"""
     store = CredentialStore(identity=AgeIdentity.generate(), path=tmp_path / "credentials.age")
     original = _credentials()
