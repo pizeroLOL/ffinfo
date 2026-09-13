@@ -30,6 +30,7 @@ from ffinfo.storage import (
     FetchProgress,
     SyncStorageClient,
 )
+from ffinfo_cli.login import refresh_credentials
 from ffinfo_cli.store import CollectionBatch, open_database
 
 _HTTP_TIMEOUT_SECONDS: Final = 60.0
@@ -122,8 +123,15 @@ async def run_sync(
 
     credentials = load_credentials(identity_path=identity_path, credentials_path=credentials_path)
     if credentials.is_expired(now=clock()):
-        msg = "凭据里的 access token 过期了，重新跑一次 `ffinfo-cli login`"
-        raise ConfigurationError(msg)
+        # 过期不急着让用户去点浏览器：refresh token 就是干这个的（RFC 6749 §6）。
+        # 它也失效了才会抛出来 —— 那时候的 AuthError 已经写明"重新 login"。
+        credentials = await refresh_credentials(
+            credentials,
+            identity_path=identity_path,
+            credentials_path=credentials_path,
+            http=http,
+            now=clock(),
+        )
 
     scoped = credentials.scoped_keys.get(OLD_SYNC_SCOPE)
     if scoped is None:

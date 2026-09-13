@@ -162,6 +162,23 @@ pub const HISTORY_TTL: u32 = 5_184_000;    // 60 天过期（毫秒）
 - token 端点：`https://oauth.accounts.firefox.com/v1/token`
 - OIDC 发现：`https://accounts.firefox.com/.well-known/openid-configuration`
 
+**刷新（RFC 6749 §6）** —— 出处：`application-services/components/fxa-client/src/internal/http_client.rs`
+（`OAauthTokenRequest::UsingRefreshToken` 与 `OAuthTokenResponse`，注释指明它照着
+`fxa-auth-server/lib/oauth/routes/token.js` 写的）：
+
+- 请求：`grant_type=refresh_token` + `client_id` + `refresh_token`（`scope` / `ttl` 可选，本库不发）
+- 响应里的 `refresh_token` 与 `keys_jwe` **都是可选的**：
+  - `refresh_token` 缺席 = 没轮换，沿用旧的；**来了就得存回去**（轮换过的那份才有用）
+  - `keys_jwe` 我们**不会收到**：请求里没带 `keys_jwk`，服务器没有公钥可加密。
+    就算收到了也解不开（登录时的临时私钥早丢了）—— 而 scoped key 本来不过期，旧的仍然对
+- `expires_in` 是必填（上游结构里就是 `u64`，不是 Option）—— 本库缺席时当场报错，不猜
+- 失败长什么样 —— **FxA 不用 RFC 那套 `invalid_grant`**（2026-09-14 实测）：
+  - 坏的 refresh token → `400` + `error: "Bad Request"` + `errno: 108`（格式对但服务器不认）/
+    `errno: 109`（参数不合法，`validation.keys` 会点名 `refresh_token`）
+  - 上游指南（`ecosystem-platform/docs/relying-parties/reference/using-apis.md`）：
+    **刷新请求也回 401 = 用户已经把这个应用的授权断开了** —— 该重新授权，而不是继续重试
+  - 这三条都翻译成了"重新授权一次"的可操作提示（`oauth.py` 的 `_ERRNO_HINTS` / 401 分支）
+
 ### 3.4 💣 `redirect_uri` 白名单（Q2 的地雷）
 
 出处：`mozilla/fxa` → `packages/fxa-content-server/app/scripts/models/reliers/oauth.js`
@@ -365,7 +382,7 @@ Firefox 跑着的时候库是 WAL 模式，**最近的访问还在 `places.sqlit
 | 2 | **`forms` collection 可能已死** | 数据范围里的"表单"拿不到 | `clients_engine` 对 forms 的 reset 返回 `Unsupported`，像遗留项。**需实测** |
 | 3 | **同步数据量远小于直觉** | 用户预期落差 | 已用"双源"解决 |
 | 4 | **Mozilla 无第三方 CLI 自助注册通道** | 项目无法"干净地"发布 | 同上，先本地自用 |
-| 5 | **access token 过期后只能人工重跑 `login`** | 与"无人值守"矛盾 —— 过期那一刻起，`sync` 只能报"重新登录" | 用凭据里已经存着的 `refresh_token` 自动续；刷新失败（`invalid_grant`）才提示重新 `login` |
+| 5 | **access token 过期后只能人工重跑 `login`** | 与"无人值守"矛盾 —— 过期那一刻起，`sync` 只能报"重新登录" | ✅ **已解决**：过期时 `sync` 先用 `refresh_token` 自动续（RFC 6749 §6，见 §3.3）；refresh token 也失效（`invalid_grant`）才提示重新 `login` |
 
 ---
 

@@ -14,12 +14,13 @@ import base64
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
 
 from ffinfo.credentials import AgeIdentity, CredentialStore
-from ffinfo.errors import BackoffError, ConfigurationError, SyncProtocolError
+from ffinfo.errors import AuthError, BackoffError, ConfigurationError, SyncProtocolError
 from ffinfo.keys import OLD_SYNC_SCOPE, ScopedKey
 from ffinfo.oauth import Credentials
 from ffinfo_cli.store import SyncCursor, SyncRecord, open_database
@@ -37,7 +38,11 @@ TOKEN_JSON: dict[str, Any] = {
 
 
 def write_credentials(
-    tmp_path: Path, *, expires_at: float = NOW + 3600, with_scope: bool = True
+    tmp_path: Path,
+    *,
+    expires_at: float = NOW + 3600,
+    with_scope: bool = True,
+    refresh_token: str | None = None,
 ) -> tuple[Path, Path]:
     """造一份真的 age 加密凭据 —— 走和 login 一样的路径。"""
     identity = AgeIdentity.generate()
@@ -49,7 +54,12 @@ def write_credentials(
         k = base64.urlsafe_b64encode(bytes(range(64))).decode("ascii").rstrip("=")
         keys[OLD_SYNC_SCOPE] = ScopedKey(kty="EC", scope=OLD_SYNC_SCOPE, k=k, kid="KID-123")
 
-    credentials = Credentials(access_token="ACCESS-TOKEN", expires_at=expires_at, scoped_keys=keys)
+    credentials = Credentials(
+        access_token="ACCESS-TOKEN",
+        refresh_token=refresh_token,
+        expires_at=expires_at,
+        scoped_keys=keys,
+    )
     credentials_path = tmp_path / "credentials.age"
     CredentialStore(identity=identity, path=credentials_path).save(credentials.to_json())
     return identity_path, credentials_path
@@ -65,10 +75,17 @@ class FakeSync:
         self.counts: dict[str, int] = {}
         self.storage_status = 200
         self.storage_headers: dict[str, str] = {}
+        self.refresh_response: httpx.Response | None = None
+        """token 端点的响应 —— 需要刷新的测试自己塞一个。"""
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         path = request.url.path
+        if path == "/v1/token":
+            if self.refresh_response is None:
+                msg = "这个测试没安排刷新 —— 给 fake.refresh_response 塞一个响应"
+                raise AssertionError(msg)
+            return self.refresh_response
         if path.endswith("/1.0/sync/1.5"):
             return httpx.Response(200, json=TOKEN_JSON)
         if path.endswith("info/collection_counts"):
@@ -83,6 +100,11 @@ class FakeSync:
         return httpx.Response(
             200, json=self.pages.pop(0), headers={"X-Last-Modified": "1789320600.12"}
         )
+
+
+def refresh_requests(fake: FakeSync) -> list[httpx.Request]:
+    """只看打给 token 端点的那些请求。"""
+    return [r for r in fake.requests if r.url.path == "/v1/token"]
 
 
 def storage_requests(fake: FakeSync, collection: str) -> list[httpx.Request]:
@@ -261,12 +283,58 @@ async def test_count_mismatch_leaves_database_untouched(tmp_path: Path) -> None:
     assert await cursor(tmp_path) is None
 
 
-async def test_expired_credentials_are_refused(tmp_path: Path) -> None:
-    """token 过期了就说清楚怎么修，别拿它去撞 401。"""
+async def test_expired_credentials_are_refreshed_instead_of_asking_again(tmp_path: Path) -> None:
+    """token 过期不劳烦用户 —— refresh token 自己续上（RFC 6749 §6），续完照常拉。"""
+    fake = FakeSync()
+    fake.counts = {"history": 1}
+    fake.pages = [[bso("a")]]
+    fake.refresh_response = httpx.Response(
+        200,
+        json={
+            "access_token": "FRESH-TOKEN",
+            "expires_in": 3600,
+            "refresh_token": "ROTATED-REFRESH",
+            "scope": OLD_SYNC_SCOPE,
+        },
+    )
+    credentials = write_credentials(tmp_path, expires_at=NOW - 1, refresh_token="OLD-REFRESH")
+    identity_path, credentials_path = credentials
+    store = CredentialStore(identity=AgeIdentity.from_file(identity_path), path=credentials_path)
+    keys_before = Credentials.from_json(store.load()).scoped_keys
+
+    report = await sync(tmp_path, fake, credentials=credentials)
+
+    assert report.inserted == 1
+    sent = refresh_requests(fake)[0]
+    body = parse_qs(sent.content.decode())
+    assert body["grant_type"] == ["refresh_token"]
+    assert body["refresh_token"] == ["OLD-REFRESH"]
+
+    saved = Credentials.from_json(store.load())
+    assert saved.access_token == "FRESH-TOKEN"
+    assert saved.refresh_token == "ROTATED-REFRESH"  # 轮换过的那份要存回去
+    assert saved.expires_at == NOW + 3600
+    assert saved.scoped_keys == keys_before  # 密钥没动（它本来不过期）
+
+
+async def test_dead_refresh_token_says_to_login_again(tmp_path: Path) -> None:
+    """refresh token 也失效了 —— 别让人猜，直接说"重新授权一次"。"""
+    fake = FakeSync()
+    fake.refresh_response = httpx.Response(400, json={"error": "invalid_grant"})
+    credentials = write_credentials(tmp_path, expires_at=NOW - 1, refresh_token="DEAD")
+
+    with pytest.raises(AuthError, match="重新授权"):
+        await sync(tmp_path, fake, credentials=credentials)
+
+    assert storage_requests(fake, "history") == []  # 没拿一份坏 token 去撞存储端点
+
+
+async def test_expired_credentials_without_a_refresh_token_say_to_login(tmp_path: Path) -> None:
+    """老凭据里没有 refresh token —— 连试都不试，消息说清只能重新 login。"""
     fake = FakeSync()
     credentials = write_credentials(tmp_path, expires_at=NOW - 1)
 
-    with pytest.raises(ConfigurationError, match="重新跑一次"):
+    with pytest.raises(AuthError, match="没有 refresh token"):
         await sync(tmp_path, fake, credentials=credentials)
 
     assert fake.requests == []

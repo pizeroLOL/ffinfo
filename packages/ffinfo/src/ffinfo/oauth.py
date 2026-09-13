@@ -72,10 +72,17 @@ _RFC7636_MIN_VERIFIER: Final = 43
 _RFC7636_MAX_VERIFIER: Final = 128
 
 _ERROR_HINTS: Final[dict[str, str]] = {
-    "invalid_grant": "授权码可能已过期或被用过，重新跑一次授权",
+    "invalid_grant": "授权码过期或被用过；刷新时出现说明 refresh token 也失效了 —— 重新授权一次",
     "invalid_client": "client_id 不被接受",
     "incorrect_redirect_uri": "redirect_uri 没命中 Mozilla 的白名单",
 }
+
+_ERRNO_HINTS: Final[dict[int, str]] = {
+    108: "服务器不认这个 token —— 重新授权一次",
+    109: "请求参数不合法（刷新时多半是 refresh token 的问题）—— 重新授权一次",
+}
+"""FxA 不用 RFC 那套 ``invalid_grant``，它有自己的 errno（实测：坏的 refresh token 回的是
+``error: "Bad Request"`` + ``errno: 108/109``）。有出处的一对写在这里，其余原样透传。"""
 
 
 def firefox_redirect_uri(client_id: str) -> str:
@@ -226,17 +233,35 @@ class OAuthClient:
 
     async def exchange_code(self, *, code: str, request: AuthorizationRequest) -> OAuthTokens:
         """拿授权码换 token（含 ``keys_jwe``）。"""
+        return await self._post_token(
+            {
+                "client_id": self._client_id,
+                "code": code,
+                "code_verifier": request.pkce.verifier,
+                "grant_type": "authorization_code",
+                "redirect_uri": self._redirect_uri,
+            }
+        )
+
+    async def refresh_access_token(self, *, refresh_token: str) -> OAuthTokens:
+        """用 refresh token 换一份新的 access token（RFC 6749 §6）。
+
+        请求里**不带** ``keys_jwk`` —— 服务器没有公钥可加密，所以响应不会有 ``keys_jwe``，
+        scoped keys 不变（它本来也不过期，见 :meth:`Credentials.is_expired`）。
+        响应**可能**带新的 ``refresh_token``（轮换）—— 调用方要把它存回去。
+        """
+        return await self._post_token(
+            {
+                "client_id": self._client_id,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+            }
+        )
+
+    async def _post_token(self, data: dict[str, str]) -> OAuthTokens:
+        """POST token 端点并解析 —— 换码与刷新共用的那一段。"""
         try:
-            response = await self._http.post(
-                self._endpoints.token,
-                data={
-                    "client_id": self._client_id,
-                    "code": code,
-                    "code_verifier": request.pkce.verifier,
-                    "grant_type": "authorization_code",
-                    "redirect_uri": self._redirect_uri,
-                },
-            )
+            response = await self._http.post(self._endpoints.token, data=data)
         except httpx.HTTPError as exc:
             msg = f"连不上 Mozilla 的 token 端点：{exc}"
             raise AuthError(msg) from exc
@@ -288,20 +313,45 @@ def _describe_error(response: httpx.Response) -> str:
     """把 Mozilla 的错误响应翻译成一句能照着做的话。"""
     error = "unknown_error"
     message = ""
+    errno: int | None = None
     try:
         payload = response.json()
         error = str(payload.get("error", error))
         message = str(payload.get("message", ""))
+        raw_errno = payload.get("errno")
+        errno = (
+            raw_errno if isinstance(raw_errno, int) and not isinstance(raw_errno, bool) else None
+        )
     except json.JSONDecodeError, AttributeError, ValueError:
         message = response.text[:200]
 
     hint = _ERROR_HINTS.get(error, "")
+    if not hint and errno is not None:
+        hint = _ERRNO_HINTS.get(errno, "")
+    if not hint and response.status_code == HTTPStatus.UNAUTHORIZED:
+        # 上游指南（relying-parties/reference/using-apis.md）：刷新也 401 = 用户已经
+        # 把这个应用的授权断开了 —— 该重新授权，而不是继续重试
+        hint = "refresh token 也失效了（用户可能已经断开授权）—— 重新授权一次"
+
     parts = [f"Mozilla 拒绝了换 token 的请求：{error}"]
+    if errno is not None:
+        parts.append(f"(errno {errno})")
     if hint:
         parts.append(f"（{hint}）")
     if message:
         parts.append(message)
     return " ".join(parts)
+
+
+def _expires_at(tokens: OAuthTokens, *, now: float) -> float:
+    """这份 token 什么时候过期。缺 ``expires_in`` 就别猜 —— 报出来。"""
+    if tokens.expires_in is None:
+        msg = (
+            "token 响应里没有 expires_in —— 没法知道这份凭据能用多久"
+            "（不敢存一个「一出生就过期」的凭据）。重新授权一次；如果还这样，那就是服务器变了。"
+        )
+        raise AuthError(msg)
+    return now + tokens.expires_in
 
 
 class Credentials(BaseModel):
@@ -325,19 +375,28 @@ class Credentials(BaseModel):
 
         ``now`` 由调用者给 —— 库不自己去读时钟。
         """
-        if tokens.expires_in is None:
-            msg = (
-                "token 响应里没有 expires_in —— 没法知道这份凭据能用多久"
-                "（不敢存一个「一出生就过期」的凭据）。重新跑一次 `ffinfo-cli login`；"
-                "如果还这样，那就是服务器变了。"
-            )
-            raise AuthError(msg)
         return cls(
             access_token=tokens.access_token,
             refresh_token=tokens.refresh_token,
             scope=tokens.scope,
-            expires_at=now + tokens.expires_in,
+            expires_at=_expires_at(tokens, now=now),
             scoped_keys=tokens.scoped_keys(key_pair),
+        )
+
+    def refreshed(self, tokens: OAuthTokens, *, now: float) -> Self:
+        """刷新后的凭据：access token 换新，``refresh_token`` 轮换了就跟着换。
+
+        ``keys_jwe`` 这里**故意不看**：刷新请求没带 ``keys_jwk``，服务器没有公钥可加密；
+        真带回来了也解不开（登录时的临时私钥早丢了）。而 scoped key 本来不过期 ——
+        旧的那份仍然是对的。
+        """
+        return self.model_copy(
+            update={
+                "access_token": tokens.access_token,
+                "refresh_token": tokens.refresh_token or self.refresh_token,
+                "scope": tokens.scope or self.scope,
+                "expires_at": _expires_at(tokens, now=now),
+            }
         )
 
     def is_expired(self, *, now: float) -> bool:

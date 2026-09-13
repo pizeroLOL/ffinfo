@@ -194,6 +194,95 @@ def _official_key_pair() -> EphemeralKeyPair:
     return EphemeralKeyPair.from_private_bytes(d)
 
 
+async def test_refresh_sends_the_rfc6749_shape_and_parses_the_response() -> None:
+    """刷新就是一次 RFC 6749 §6 的 POST —— 参数名要对得上（对着上游 fxa-client 核过）。"""
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["form"] = {k: v[0] for k, v in parse_qs(request.content.decode()).items()}
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "fresh-token",
+                "expires_in": 3600,
+                "refresh_token": "rotated",
+                "scope": OLD_SYNC_SCOPE,
+            },
+        )
+
+    client = _client(handler)
+
+    tokens = await client.refresh_access_token(refresh_token="old-refresh")
+
+    assert seen["form"] == {
+        "client_id": CLIENT_ID,
+        "grant_type": "refresh_token",
+        "refresh_token": "old-refresh",
+    }
+    assert tokens.access_token == "fresh-token"
+    assert tokens.refresh_token == "rotated"
+
+
+async def test_refresh_failure_is_an_actionable_error() -> None:
+    """refresh token 也失效了 —— 消息里要有"重新授权"这条出路。"""
+    client = _client(lambda _: httpx.Response(400, json={"error": "invalid_grant"}))
+
+    with pytest.raises(AuthError, match="重新授权"):
+        await client.refresh_access_token(refresh_token="dead")
+
+
+async def test_refresh_401_means_the_user_disconnected() -> None:
+    """上游指南：刷新回 401 = 用户把这个应用的授权断开了 —— 该重新授权，别重试。"""
+    client = _client(lambda _: httpx.Response(401, json={"code": 401, "error": "Unauthorized"}))
+
+    with pytest.raises(AuthError, match="断开授权"):
+        await client.refresh_access_token(refresh_token="revoked")
+
+
+async def test_fxa_errno_is_reported_and_hinted() -> None:
+    """FxA 不用 ``invalid_grant``：实测坏 token 回的是 ``errno: 108`` —— 得认这个。"""
+    client = _client(
+        lambda _: httpx.Response(
+            400,
+            json={
+                "code": 400,
+                "errno": 108,
+                "error": "Bad Request",
+                "message": "Invalid token",
+            },
+        )
+    )
+
+    with pytest.raises(AuthError) as caught:
+        await client.refresh_access_token(refresh_token="unknown")
+
+    assert "errno 108" in str(caught.value)
+    assert "重新授权" in str(caught.value)
+
+
+def test_refreshed_credentials_keep_what_the_response_omits() -> None:
+    """刷新响应可以不带 ``refresh_token``（没轮换）—— 那就沿用旧的，别把它抹掉。"""
+    original = _credentials()
+
+    refreshed = original.refreshed(
+        OAuthTokens(access_token="fresh-token", expires_in=60), now=2_000.0
+    )
+
+    assert refreshed.access_token == "fresh-token"
+    assert refreshed.expires_at == 2_060.0
+    assert refreshed.refresh_token == original.refresh_token
+    assert refreshed.scoped_keys == original.scoped_keys  # scoped key 不过期，不动它
+
+
+def test_refreshed_credentials_take_a_rotated_refresh_token() -> None:
+    """响应带了新的 ``refresh_token`` —— 轮换了，得存新的。"""
+    refreshed = _credentials().refreshed(
+        OAuthTokens(access_token="fresh-token", expires_in=60, refresh_token="rotated"), now=2_000.0
+    )
+
+    assert refreshed.refresh_token == "rotated"
+
+
 async def test_exchange_code_yields_the_sync_key_bundle() -> None:
     """授权码 → token → keys_jwe → 64 字节 kSync。
 

@@ -15,6 +15,7 @@ import httpx
 import typer
 
 from ffinfo.credentials import AgeIdentity, CredentialStore
+from ffinfo.errors import AuthError
 from ffinfo.oauth import (
     FIREFOX_IOS_CLIENT_ID,
     OLD_SYNC_SCOPE,
@@ -99,3 +100,36 @@ def login_sync(*, identity_path: Path, credentials_path: Path) -> Credentials:
             )
 
     return asyncio.run(_main())
+
+
+async def refresh_credentials(
+    credentials: Credentials,
+    *,
+    identity_path: Path,
+    credentials_path: Path,
+    http: httpx.AsyncClient,
+    now: float,
+) -> Credentials:
+    """拿 refresh token 续一份新的，落盘，返回 —— 用户不用再点浏览器。
+
+    ``refresh_token`` 也失效了（``invalid_grant``）就抛 :class:`AuthError`，
+    消息里写清只能重新 ``login``。
+    """
+    if credentials.refresh_token is None:
+        msg = "这份凭据里没有 refresh token —— 只能重新跑一次 `ffinfo-cli login`"
+        raise AuthError(msg)
+
+    client = OAuthClient(
+        client_id=FIREFOX_IOS_CLIENT_ID,
+        redirect_uri=firefox_redirect_uri(FIREFOX_IOS_CLIENT_ID),
+        http=http,
+        endpoints=default_endpoints(),
+    )
+    tokens = await client.refresh_access_token(refresh_token=credentials.refresh_token)
+    refreshed = credentials.refreshed(tokens, now=now)
+    store = CredentialStore(
+        identity=AgeIdentity.from_file(identity_path),
+        path=credentials_path,
+    )
+    store.save(refreshed.to_json())
+    return refreshed
