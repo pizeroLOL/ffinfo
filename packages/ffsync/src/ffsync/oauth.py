@@ -1,0 +1,336 @@
+"""Mozilla 账号的 OAuth 2.0 授权（oob 模式）—— 03 号 ticket。
+
+**密码永不经过本库**：授权全程在 accounts.firefox.com 的网页上完成，
+本库只经手授权码 —— 代码层面没有任何地方能接触到密码。
+
+为什么是 oob（让用户从地址栏复制回调 URL）而不是本地回调：
+请求 scoped keys 时 ``redirect_uri`` 必须命中 Mozilla 的显式白名单，
+第三方工具进不去（``docs/design.md`` §3.4）。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import secrets
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Final, Protocol, Self
+from urllib.parse import parse_qs, urlencode, urlparse
+
+import httpx
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+from ffsync._encoding import b64url_encode
+from ffsync.crypto import KeyBundle
+from ffsync.errors import AuthError
+from ffsync.jwe import EphemeralKeyPair
+from ffsync.keys import OLD_SYNC_SCOPE, ScopedKey, parse_scoped_keys
+
+__all__ = [
+    "FIREFOX_DESKTOP_CLIENT_ID",
+    "OLD_SYNC_READ_SCOPE",
+    "AuthorizationRequest",
+    "CodeReceiver",
+    "Credentials",
+    "OAuthClient",
+    "OAuthEndpoints",
+    "OAuthTokens",
+    "PkcePair",
+    "firefox_desktop_redirect_uri",
+    "parse_callback_url",
+]
+
+FIREFOX_DESKTOP_CLIENT_ID: Final = "5882386c6d801776"
+"""Firefox Desktop 的 ``client_id``（Mozilla 的公开常量，见 ``FxAccountsCommon.sys.mjs``）。
+
+⚠️ 这是**借来的**身份：Mozilla 随时可能改或封（``docs/design.md`` 风险 1）。
+所以它只是给人看的默认值，:class:`OAuthClient` 仍要求显式传入，方便换成自己的。
+"""
+
+OLD_SYNC_READ_SCOPE: Final = "https://identity.mozilla.com/apps/oldsync#read"
+"""只读 scope —— 本库严格只读，不写回 Mozilla。"""
+
+_AUTHORIZATION_ENDPOINT: Final = "https://accounts.firefox.com/authorization"
+_TOKEN_ENDPOINT: Final = "https://oauth.accounts.firefox.com/v1/token"
+
+_STATE_BYTES: Final = 32
+_PKCE_VERIFIER_BYTES: Final = 64
+_RFC7636_MIN_VERIFIER: Final = 43
+_RFC7636_MAX_VERIFIER: Final = 128
+
+_ERROR_HINTS: Final[dict[str, str]] = {
+    "invalid_grant": "授权码可能已过期或被用过，重新跑一次授权",
+    "invalid_client": "client_id 不被接受",
+    "incorrect_redirect_uri": "redirect_uri 没命中 Mozilla 的白名单",
+}
+
+
+def firefox_desktop_redirect_uri(client_id: str = FIREFOX_DESKTOP_CLIENT_ID) -> str:
+    """借来的 ``client_id`` 对应的回调地址 —— 就是命中白名单的那一个。"""
+    return f"https://accounts.firefox.com/oauth/success/{client_id}"
+
+
+def default_endpoints() -> OAuthEndpoints:
+    """Mozilla 的正式端点。"""
+    return OAuthEndpoints(authorization=_AUTHORIZATION_ENDPOINT, token=_TOKEN_ENDPOINT)
+
+
+@dataclass(frozen=True, slots=True)
+class OAuthEndpoints:
+    """两个端点。做成参数是为了能对着别的服务器跑（测试、将来的自建）。"""
+
+    authorization: str
+    token: str
+
+
+@dataclass(frozen=True, slots=True)
+class PkcePair:
+    """RFC 7636 的 PKCE 对：verifier 自己留着，challenge 发出去。
+
+    **只用 S256** —— Mozilla 不支持 ``plain``。
+    """
+
+    verifier: str
+    challenge: str
+
+    @classmethod
+    def from_verifier(cls, verifier: str) -> Self:
+        """由既有 verifier 算出 challenge（``BASE64URL(SHA256(ASCII(verifier)))``）。"""
+        if not _RFC7636_MIN_VERIFIER <= len(verifier) <= _RFC7636_MAX_VERIFIER:
+            msg = (
+                f"PKCE verifier 的长度必须在 {_RFC7636_MIN_VERIFIER}–{_RFC7636_MAX_VERIFIER} "
+                f"之间，收到 {len(verifier)}"
+            )
+            raise AuthError(msg)
+        digest = hashlib.sha256(verifier.encode("ascii")).digest()
+        return cls(verifier=verifier, challenge=b64url_encode(digest))
+
+    @classmethod
+    def generate(cls) -> Self:
+        """现场生成一对。"""
+        return cls.from_verifier(secrets.token_urlsafe(_PKCE_VERIFIER_BYTES))
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorizationRequest:
+    """一次授权请求的全部状态：URL 交给用户，其余留着换 token。"""
+
+    url: str
+    state: str
+    pkce: PkcePair
+    key_pair: EphemeralKeyPair
+
+
+class OAuthTokens(BaseModel):
+    """token 端点的响应。"""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    access_token: str
+    token_type: str = "bearer"
+    scope: str = ""
+    expires_in: int = 0
+    refresh_token: str | None = None
+    keys_jwe: str | None = None
+
+    def scoped_keys(self, key_pair: EphemeralKeyPair) -> dict[str, ScopedKey]:
+        """解开 ``keys_jwe``，拿到各 scope 的密钥。"""
+        if not self.keys_jwe:
+            msg = "这次授权没有返回 keys_jwe —— 拿不到同步密钥（scope 没申请对？）"
+            raise AuthError(msg)
+        return parse_scoped_keys(key_pair.decrypt_jwe(self.keys_jwe))
+
+
+class CodeReceiver(Protocol):
+    """授权码怎么到手 —— 现在是"用户复制地址栏 URL"，将来可以换 localhost 回调。
+
+    OAuth 流程只依赖这个协议，换实现不用改上层（03 号 ticket 的要求）。
+    """
+
+    def receive(self, authorization_url: str) -> str:
+        """把授权 URL 交给用户，拿回他粘回来的回调 URL。"""
+        ...
+
+
+class OAuthClient:
+    """Mozilla 账号的 OAuth 客户端。**没有密码可传，也没有密码可存。**"""
+
+    __slots__ = ("_client_id", "_endpoints", "_http", "_redirect_uri")
+
+    def __init__(
+        self,
+        *,
+        client_id: str,
+        redirect_uri: str,
+        http: httpx.AsyncClient,
+        endpoints: OAuthEndpoints,
+    ) -> None:
+        """全部由调用者注入 —— 库不认识任何默认端点，也不碰磁盘。"""
+        self._client_id = client_id
+        self._redirect_uri = redirect_uri
+        self._http = http
+        self._endpoints = endpoints
+
+    def __repr__(self) -> str:
+        """只打印 client_id，不打印任何凭据。"""
+        return f"OAuthClient(client_id={self._client_id!r})"
+
+    def start_authorization(self, *, scopes: Sequence[str]) -> AuthorizationRequest:
+        """生成授权 URL 与本次请求的状态（PKCE + ``keys_jwk``）。"""
+        pkce = PkcePair.generate()
+        state = secrets.token_urlsafe(_STATE_BYTES)
+        key_pair = EphemeralKeyPair.generate()
+
+        query = urlencode(
+            {
+                "client_id": self._client_id,
+                "redirect_uri": self._redirect_uri,
+                "scope": " ".join(scopes),
+                "state": state,
+                "code_challenge": pkce.challenge,
+                "code_challenge_method": "S256",
+                "access_type": "offline",
+                "keys_jwk": json.dumps(key_pair.public_jwk(), separators=(",", ":")),
+            }
+        )
+        return AuthorizationRequest(
+            url=f"{self._endpoints.authorization}?{query}",
+            state=state,
+            pkce=pkce,
+            key_pair=key_pair,
+        )
+
+    async def exchange_code(self, *, code: str, request: AuthorizationRequest) -> OAuthTokens:
+        """拿授权码换 token（含 ``keys_jwe``）。"""
+        try:
+            response = await self._http.post(
+                self._endpoints.token,
+                data={
+                    "client_id": self._client_id,
+                    "code": code,
+                    "code_verifier": request.pkce.verifier,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": self._redirect_uri,
+                },
+            )
+        except httpx.HTTPError as exc:
+            msg = f"连不上 Mozilla 的 token 端点：{exc}"
+            raise AuthError(msg) from exc
+
+        if response.status_code != httpx.codes.OK:
+            raise AuthError(_describe_error(response))
+
+        try:
+            return OAuthTokens.model_validate_json(response.content)
+        except ValidationError as exc:
+            msg = "token 端点的响应不是我们认识的样子"
+            raise AuthError(msg) from exc
+
+
+def parse_callback_url(url: str, *, expected_state: str) -> str:
+    """从用户粘回来的 URL 里取出授权码，并校验 ``state``。
+
+    校验顺序是有讲究的：先认 ``state``（确认这条 URL 确实是本次授权的），
+    再看 ``error``（用户点了拒绝），最后才取 ``code``。
+    """
+    query = parse_qs(urlparse(url.strip()).query)
+
+    state = _first(query, "state")
+    if state != expected_state:
+        msg = (
+            "回调 URL 里的 state 和本次授权请求对不上 —— "
+            "可能是复制错了 URL，或这次授权不是本工具发起的"
+        )
+        raise AuthError(msg)
+
+    error = _first(query, "error")
+    if error:
+        msg = f"Mozilla 拒绝了这次授权：{error}"
+        raise AuthError(msg)
+
+    code = _first(query, "code")
+    if not code:
+        msg = "回调 URL 里没有 code 参数 —— 请把地址栏里完整的那一条复制过来"
+        raise AuthError(msg)
+    return code
+
+
+def _first(query: dict[str, list[str]], key: str) -> str | None:
+    values = query.get(key)
+    return values[0] if values else None
+
+
+def _describe_error(response: httpx.Response) -> str:
+    """把 Mozilla 的错误响应翻译成一句能照着做的话。"""
+    error = "unknown_error"
+    message = ""
+    try:
+        payload = response.json()
+        error = str(payload.get("error", error))
+        message = str(payload.get("message", ""))
+    except json.JSONDecodeError, AttributeError, ValueError:
+        message = response.text[:200]
+
+    hint = _ERROR_HINTS.get(error, "")
+    parts = [f"Mozilla 拒绝了换 token 的请求：{error}"]
+    if hint:
+        parts.append(f"（{hint}）")
+    if message:
+        parts.append(message)
+    return " ".join(parts)
+
+
+class Credentials(BaseModel):
+    """一份可以落盘的凭据：token + 各 scope 的密钥。
+
+    本类只管"长什么样"和"怎么序列化"；落盘走 02 的
+    :class:`~ffsync.credentials.CredentialStore`（age 加密 + 权限纪律）。
+    """
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    access_token: str
+    refresh_token: str | None = None
+    scope: str = ""
+    expires_at: float = 0.0
+    scoped_keys: dict[str, ScopedKey] = {}
+
+    @classmethod
+    def from_tokens(cls, tokens: OAuthTokens, key_pair: EphemeralKeyPair, *, now: float) -> Self:
+        """把 token 响应整理成可以长期保存的形态。
+
+        ``now`` 由调用者给 —— 库不自己去读时钟。
+        """
+        return cls(
+            access_token=tokens.access_token,
+            refresh_token=tokens.refresh_token,
+            scope=tokens.scope,
+            expires_at=now + tokens.expires_in,
+            scoped_keys=tokens.scoped_keys(key_pair),
+        )
+
+    def is_expired(self, *, now: float) -> bool:
+        """``access_token`` 过期了没（密钥不过期，token 会）。"""
+        return now >= self.expires_at
+
+    def sync_key_bundle(self) -> KeyBundle:
+        """oldsync 的同步密钥 —— 03 号 ticket 的终点。"""
+        scoped = self.scoped_keys.get(OLD_SYNC_SCOPE)
+        if scoped is None:
+            msg = "这份凭据里没有 oldsync scope 的密钥"
+            raise AuthError(msg)
+        return scoped.to_key_bundle()
+
+    def to_json(self) -> str:
+        """序列化成一段文本，交给 :class:`CredentialStore` 去加密。"""
+        return self.model_dump_json()
+
+    @classmethod
+    def from_json(cls, payload: str) -> Self:
+        """从 :class:`CredentialStore` 解出来的文本还原。"""
+        try:
+            return cls.model_validate_json(payload)
+        except ValidationError as exc:
+            msg = "凭据内容不是我们认识的样子"
+            raise AuthError(msg) from exc

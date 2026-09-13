@@ -10,6 +10,7 @@ from ffsync.credentials import AgeIdentity, CredentialStore
 from ffsync.crypto import EncryptedPayload, KeyBundle
 from ffsync.errors import FfsyncError
 from ffsync.keys import OLD_SYNC_SCOPE, CollectionKeys, ScopedKey, parse_scoped_keys
+from ffsync.oauth import Credentials, OAuthClient, OAuthEndpoints, PkcePair
 
 __version__ = "0.1.0"
 
@@ -18,9 +19,13 @@ __all__ = [
     "AgeIdentity",
     "CollectionKeys",
     "CredentialStore",
+    "Credentials",
     "EncryptedPayload",
     "FfsyncError",
     "KeyBundle",
+    "OAuthClient",
+    "OAuthEndpoints",
+    "PkcePair",
     "ScopedKey",
     "__version__",
     "parse_scoped_keys",
