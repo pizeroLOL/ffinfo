@@ -25,7 +25,7 @@ from pydantic import BaseModel, ConfigDict
 
 from ffinfo_cli.paths import config_dir, credentials_path, data_dir, database_path, identity_path
 from ffinfo_cli.places import discover_profiles, firefox_roots
-from ffinfo_cli.store import load_cursors, open_database
+from ffinfo_cli.store import open_database
 
 __all__ = ["LocalPaths", "ProfilesReport", "build_report", "default_paths", "profiles_blocking"]
 
@@ -132,7 +132,7 @@ async def build_report(
     db_note: str | None = None
     if paths.database.is_file():
         try:
-            engine = await open_database(paths.database)
+            store = await open_database(paths.database)
             collections = [
                 CollectionProgress(
                     collection=cursor.collection,
@@ -140,7 +140,7 @@ async def build_report(
                     last_modified=cursor.last_modified,
                     synced_at=datetime.fromtimestamp(cursor.synced_at, tz=UTC).isoformat(),
                 )
-                for cursor in await load_cursors(engine)
+                for cursor in await store.load_cursors()
             ]
         except (OSError, sqlite3.Error) as exc:
             db_note = f"本地库打不开：{exc}"

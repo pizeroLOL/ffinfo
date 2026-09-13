@@ -25,7 +25,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from http import HTTPStatus
-from typing import Any, ClassVar, Final
+from typing import Any, ClassVar, Final, cast
 
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -594,7 +594,7 @@ def _required_last_modified(response: httpx.Response) -> float:
 def _records_from_json(response: httpx.Response, collection: str) -> list[EncryptedBso]:
     """把一页的响应体解析成 BSO 列表。"""
     try:
-        payload: Any = response.json()
+        payload: object = response.json()
     except ValueError as exc:
         msg = f"collection「{collection}」的响应不是合法 JSON"
         raise SyncProtocolError(msg) from exc
@@ -602,7 +602,7 @@ def _records_from_json(response: httpx.Response, collection: str) -> list[Encryp
         msg = f"collection「{collection}」的响应不是一个列表，拿到 {type(payload).__name__}"
         raise SyncProtocolError(msg)
     try:
-        return [EncryptedBso.model_validate(item) for item in payload]
+        return [EncryptedBso.model_validate(item) for item in cast(list[Any], payload)]
     except ValidationError as exc:
         msg = f"collection「{collection}」里有认不出来的记录"
         raise SyncProtocolError(msg) from exc
@@ -611,7 +611,7 @@ def _records_from_json(response: httpx.Response, collection: str) -> list[Encryp
 def _counts_from_json(response: httpx.Response) -> dict[str, int]:
     """``/info/collection_counts`` 的响应 → ``{collection: 条数}``。"""
     try:
-        payload: Any = response.json()
+        payload: object = response.json()
     except ValueError as exc:
         msg = "collection 计数的响应不是合法 JSON"
         raise SyncProtocolError(msg) from exc
@@ -619,7 +619,7 @@ def _counts_from_json(response: httpx.Response) -> dict[str, int]:
         msg = f"collection 计数的响应不是一个对象，拿到 {type(payload).__name__}"
         raise SyncProtocolError(msg)
     try:
-        return {str(name): int(count) for name, count in payload.items()}
+        return {str(name): int(count) for name, count in cast(dict[str, Any], payload).items()}
     except (TypeError, ValueError) as exc:
         msg = "collection 计数的响应里有不是数字的值"
         raise SyncProtocolError(msg) from exc

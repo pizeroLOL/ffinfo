@@ -5,10 +5,18 @@
 表按设计文档决策 12 的"双源分表 + 保留来源标记"来切：``sync_records`` 只放云端来的，
 将来本地 ``places.sqlite`` 来的走另一张表 —— 不硬凑成一张。
 
+对外的 interface 是 :class:`Store`：piccolo 只在这个 module 里出现，调用方碰不到表类与绑定。
+
 **墓碑不落库。** 服务器上的墓碑（``payload`` 为 ``null``）表示"这条在别的设备上被删了"，
 所以它的正确归宿是**让那一行不存在**，而不是存一条空记录。于是"库里有行"就等于
 "这条记录在服务器上存在" —— 消费方不用再判空。
 """
+
+# 上面三行：piccolo 没有类型存根（表定义、select/update 的返回都是 unknown）。
+# 表类只在这个 module 里出现；调用方拿到的 Store 接口是全类型的。
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
+# pyright: reportUnknownArgumentType=false, reportUnknownParameterType=false
+# pyright: reportUnknownLambdaType=false, reportAttributeAccessIssue=false
 
 from __future__ import annotations
 
@@ -32,21 +40,11 @@ __all__ = [
     "CollectionBatch",
     "CursorInfo",
     "LocalVisitRow",
+    "Store",
     "StoredVisit",
     "SyncCursor",
     "SyncRecord",
-    "count_records",
-    "load_cursor",
-    "load_cursors",
-    "load_local_visits",
-    "load_records",
-    "merge_sync_cursors",
-    "merge_sync_records",
     "open_database",
-    "replace_collection",
-    "save_cursor",
-    "store_batches",
-    "store_local_visits",
 ]
 
 
@@ -131,6 +129,379 @@ class CollectionBatch:
     """``True`` = 整体替换（全量拉取）；``False`` = 增量 upsert。"""
 
 
+class Store:
+    """本地库的 adapter —— **piccolo 只在这个 module 里出现**。
+
+    构造走 :func:`open_database`。每个操作开始前把表绑到这把 engine 上 ——
+    piccolo 的表是类级单例，"绑哪个库"只能挂在类上，所以这一步集中在 :meth:`_bind`。
+    """
+
+    __slots__: tuple[str, ...] = ("_engine",)
+
+    def __init__(self, engine: SQLiteEngine) -> None:
+        """包一把 engine；一般走 :func:`open_database`。"""
+        self._engine = engine
+
+    def _bind(self) -> None:
+        """把表绑到这把 engine 上 —— 每个操作先调它，别让上一位调用方的绑定留下来。"""
+        _bind(self._engine)
+
+    async def store_batches(self, batches: Sequence[CollectionBatch]) -> dict[str, ApplyResult]:
+        """**一次事务**里写入多个 collection —— 要么全成，要么一个字节都不写。
+
+        为什么要一次事务：``history`` 写进去了、``crypto/keys`` 没写进去，
+        库就处于"有数据但解不开"的半截状态 —— 那比什么都没有更让人困惑。
+        """
+        self._bind()
+        results: dict[str, ApplyResult] = {}
+        async with self._engine.transaction():
+            for batch in batches:
+                results[batch.collection] = await self._write_one(batch)
+        return results
+
+    async def _write_one(self, batch: CollectionBatch) -> ApplyResult:
+        """写一个 collection。**调用方负责事务。**"""
+        if batch.full:
+            return await self._replace(batch.collection, batch.records)
+        return await self._apply(batch.collection, batch.records)
+
+    async def _replace(self, collection: str, records: Sequence[EncryptedBso]) -> ApplyResult:
+        """整体替换：删了重插。全量拉取用这个 —— 天然幂等，也不会留下上一轮已删的记录。
+
+        ``deleted`` 报的是**真的没了的那部分**（老行里没被重插的）—— ``--full`` 的对账
+        就靠它：agent 问"全量之后什么被删了"，答案不能永远是 0。
+
+        同一批里同 id 出现多次时与增量一样只认最新的一条（跨页重复不该把整次同步打翻）。
+        """
+        live = [record for record in _newest_per_id(records) if record.payload is not None]
+        rows = [_row(collection, record) for record in live]
+        after = {record.id for record in live}
+        before = {
+            str(row["record_id"])
+            for row in await SyncRecord.select(SyncRecord.record_id).where(
+                SyncRecord.collection == collection
+            )
+        }
+        await SyncRecord.delete().where(SyncRecord.collection == collection)
+        if rows:
+            await SyncRecord.insert(*rows)
+        return ApplyResult(
+            inserted=len(after - before),
+            updated=len(after & before),
+            deleted=len(before - after),
+        )
+
+    async def _apply(self, collection: str, records: Sequence[EncryptedBso]) -> ApplyResult:
+        """增量 upsert：新记录插入、更新的覆盖、墓碑删行。
+
+        增量拉回来的只是**变更集**，所以不能像全量那样"删了重插" ——
+        那会把没变更的几千条一起端掉。
+
+        **只在 ``modified`` 更新时才覆盖**：变更集里混进一条旧的（服务器重发、
+        两份导出交叉）不能把库里的新数据盖回去。同一批里同 id 出现多次时，
+        只有最新的那条算数 —— 库里的唯一索引不接受两行。
+        """
+        existing = {
+            str(row["record_id"]): (int(row["id"]), float(row["modified"]))
+            for row in await SyncRecord.select(
+                SyncRecord.id, SyncRecord.record_id, SyncRecord.modified
+            ).where(SyncRecord.collection == collection)
+        }
+
+        fresh: list[SyncRecord] = []
+        updates: list[tuple[int, EncryptedBso]] = []
+        removals: list[int] = []
+        for record in _newest_per_id(records):
+            entry = existing.get(record.id)
+            if record.payload is None:
+                if entry is not None:
+                    removals.append(entry[0])
+            elif entry is None:
+                fresh.append(_row(collection, record))
+            elif record.modified > entry[1]:
+                updates.append((entry[0], record))
+
+        if fresh:
+            await SyncRecord.insert(*fresh)
+        for row_id, record in updates:
+            await SyncRecord.update(
+                {
+                    SyncRecord.modified: record.modified,
+                    SyncRecord.payload: record.payload,
+                    SyncRecord.sortindex: record.sortindex,
+                    SyncRecord.ttl: record.ttl,
+                }
+            ).where(SyncRecord.id == row_id)
+        if removals:
+            await SyncRecord.delete().where(SyncRecord.id.is_in(removals))
+
+        return ApplyResult(inserted=len(fresh), updated=len(updates), deleted=len(removals))
+
+    async def replace_collection(self, collection: str, records: Sequence[EncryptedBso]) -> int:
+        """用这一批记录整体替换**一个** collection，返回这次落进去多少条（新插 + 覆盖）。"""
+        result = await self.store_batches(
+            [CollectionBatch(collection=collection, records=records, full=True)]
+        )
+        applied = result[collection]
+        return applied.inserted + applied.updated
+
+    async def load_cursor(self, collection: str) -> float | None:
+        """读游标。没有、或者值坏了（不是个数字）都返回 ``None`` —— 调用方回退到全量。
+
+        游标坏了就当没有：全量重拉一次是**安全**的，而拿着一个坏游标往下跑会**静默漏数据**。
+        """
+        self._bind()
+        rows = await SyncCursor.select(SyncCursor.last_modified).where(
+            SyncCursor.collection == collection
+        )
+        if not rows:
+            return None
+        value = rows[0]["last_modified"]
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            return None
+        return float(value)
+
+    async def save_cursor(
+        self,
+        collection: str,
+        *,
+        last_modified: float,
+        synced_at: float,
+        records: int,
+    ) -> None:
+        """推进游标。**只在一次完整拉取成功之后调**。"""
+        self._bind()
+        async with self._engine.transaction():
+            await SyncCursor.delete().where(SyncCursor.collection == collection)
+            await SyncCursor.insert(
+                SyncCursor(
+                    collection=collection,
+                    last_modified=last_modified,
+                    synced_at=synced_at,
+                    records=records,
+                )
+            )
+
+    async def load_records(self, collection: str) -> list[tuple[str, str | None]]:
+        """读一个 collection 的 ``(record_id, payload)``。"""
+        self._bind()
+        rows = await SyncRecord.select(SyncRecord.record_id, SyncRecord.payload).where(
+            SyncRecord.collection == collection
+        )
+        return [(str(row["record_id"]), row["payload"]) for row in rows]
+
+    async def count_records(self, collection: str) -> int:
+        """库里这个 collection 现在有多少条。"""
+        self._bind()
+        return await SyncRecord.count().where(SyncRecord.collection == collection)
+
+    async def load_cursors(self) -> tuple[CursorInfo, ...]:
+        """所有 collection 的同步进度 —— 没同步过的 collection 不在里面。"""
+        self._bind()
+        rows = await SyncCursor.select().order_by(SyncCursor.collection)
+        return tuple(
+            CursorInfo(
+                collection=str(row["collection"]),
+                last_modified=float(row["last_modified"]),
+                synced_at=float(row["synced_at"]),
+                records=int(row["records"]),
+            )
+            for row in rows
+        )
+
+    async def store_local_visits(self, visits: Sequence[StoredVisit]) -> ApplyResult:
+        """写入本地访问。**幂等** —— 同一份导出再导一次，条数不会翻倍。
+
+        认"同一次访问"靠 ``(machine, url, visited_at)``：那个自增主键在"删了重插"之后会
+        重排（实测），拿它当身份会串行。同一批里重复出现的也在这里顺手去重。
+
+        标题变了算 ``updated``（Firefox 会改标题，那是同一次访问，不该多出一行）。
+        """
+        self._bind()
+        existing = {
+            (str(row["machine"]), str(row["url"]), int(row["visited_at"])): (
+                row["id"],
+                str(row["title"]),
+            )
+            for row in await LocalVisitRow.select(
+                LocalVisitRow.id,
+                LocalVisitRow.machine,
+                LocalVisitRow.url,
+                LocalVisitRow.visited_at,
+                LocalVisitRow.title,
+            )
+        }
+
+        fresh: list[LocalVisitRow] = []
+        updates: list[tuple[int, str]] = []
+        seen: set[tuple[str, str, int]] = set()
+        for item in visits:
+            key = (item.machine, item.url, to_microseconds(item.visited_at))
+            if key in seen:
+                continue
+            seen.add(key)
+            found = existing.get(key)
+            if found is None:
+                fresh.append(
+                    LocalVisitRow(
+                        machine=item.machine,
+                        url=item.url,
+                        title=item.title,
+                        visited_at=key[2],
+                        visit_type=item.visit_type,
+                    )
+                )
+            elif found[1] != item.title:
+                updates.append((found[0], item.title))
+
+        if fresh:
+            await LocalVisitRow.insert(*fresh)
+        for row_id, title in updates:
+            await LocalVisitRow.update({LocalVisitRow.title: title}).where(
+                LocalVisitRow.id == row_id
+            )
+
+        return ApplyResult(inserted=len(fresh), updated=len(updates), deleted=0)
+
+    async def load_local_visits(self) -> tuple[StoredVisit, ...]:
+        """读出全部本地访问，按时间升序。**没导入过就是空元组** —— 单源降级走这条路。"""
+        self._bind()
+        rows = await LocalVisitRow.select().order_by(LocalVisitRow.visited_at)
+        return tuple(
+            StoredVisit(
+                machine=str(row["machine"]),
+                url=str(row["url"]),
+                title=str(row["title"]),
+                visited_at=from_microseconds(int(row["visited_at"])),
+                visit_type=int(row["visit_type"]),
+            )
+            for row in rows
+        )
+
+    async def merge_sync_records(
+        self, records: Sequence[PortableRecord]
+    ) -> tuple[ApplyResult, int]:
+        """把导出来的云端记录并进库。返回 ``(落库的账, 被保住没动的条数)``。
+
+        **只在导出的那条更新时才覆盖。** 目标机器可能自己 sync 过、比这份导出还新 ——
+        拿旧数据把新数据盖回去是不可逆的损失，所以这里认 ``modified``，不是无脑 upsert。
+
+        墓碑（``payload`` 为 ``None``）直接跳过：库里的约定是"有行 == 这条记录存在"
+        （见本模块开头的说明），收下一条空记录会把这个约定捅破。
+        """
+        self._bind()
+        existing = {
+            (str(row["collection"]), str(row["record_id"])): float(row["modified"])
+            for row in await SyncRecord.select(
+                SyncRecord.collection, SyncRecord.record_id, SyncRecord.modified
+            )
+        }
+
+        fresh: list[SyncRecord] = []
+        updates: list[PortableRecord] = []
+        kept = 0
+        for item in _newest_per_record(records):
+            if item.payload is None:
+                kept += 1
+                continue
+            current = existing.get((item.collection, item.record_id))
+            if current is None:
+                fresh.append(
+                    SyncRecord(
+                        collection=item.collection,
+                        record_id=item.record_id,
+                        modified=item.modified,
+                        payload=item.payload,
+                        sortindex=item.sortindex,
+                        ttl=item.ttl,
+                    )
+                )
+            elif item.modified > current:
+                updates.append(item)
+            else:
+                kept += 1
+
+        if fresh:
+            await SyncRecord.insert(*fresh)
+        for item in updates:
+            await SyncRecord.update(
+                {
+                    SyncRecord.modified: item.modified,
+                    SyncRecord.payload: item.payload,
+                    SyncRecord.sortindex: item.sortindex,
+                    SyncRecord.ttl: item.ttl,
+                }
+            ).where(
+                (SyncRecord.collection == item.collection)
+                & (SyncRecord.record_id == item.record_id)
+            )
+
+        return ApplyResult(inserted=len(fresh), updated=len(updates), deleted=0), kept
+
+    async def load_all_records(self) -> tuple[PortableRecord, ...]:
+        """库里全部记录（明文形态）—— 导出便携文件用。"""
+        self._bind()
+        rows = await SyncRecord.select().order_by(SyncRecord.collection, SyncRecord.record_id)
+        return tuple(
+            PortableRecord(
+                collection=str(row["collection"]),
+                record_id=str(row["record_id"]),
+                modified=float(row["modified"]),
+                payload=None if row["payload"] is None else str(row["payload"]),
+                sortindex=None if row["sortindex"] is None else int(row["sortindex"]),
+                ttl=None if row["ttl"] is None else int(row["ttl"]),
+            )
+            for row in rows
+        )
+
+    async def load_all_cursors(self) -> tuple[PortableCursor, ...]:
+        """库里全部游标 —— 导出便携文件用。"""
+        self._bind()
+        rows = await SyncCursor.select()
+        return tuple(
+            PortableCursor(
+                collection=str(row["collection"]),
+                last_modified=float(row["last_modified"]),
+                synced_at=float(row["synced_at"]),
+                records=int(row["records"]),
+            )
+            for row in rows
+        )
+
+    async def merge_sync_cursors(self, cursors: Sequence[PortableCursor]) -> int:
+        """推进游标，返回推进了几个。
+
+        **只往前推。** 旧游标会把已经拉过的区间重拉一遍；更糟的是把"上次同步到哪儿"
+        这个判断依据改小 —— 那之后真正的增量就再也不会去拉了。
+        """
+        advanced = 0
+        for item in cursors:
+            current = await self.load_cursor(item.collection)
+            if current is not None and item.last_modified <= current:
+                continue
+            await self.save_cursor(
+                item.collection,
+                last_modified=item.last_modified,
+                synced_at=item.synced_at,
+                records=item.records,
+            )
+            advanced += 1
+        return advanced
+
+
+@dataclass(frozen=True, slots=True)
+class CursorInfo:
+    """一个 collection 的同步进度。"""
+
+    collection: str
+    last_modified: float
+    """服务器给的 collection 时间戳（下次增量拉取的起点）。"""
+    synced_at: float
+    """上次同步完成的时间（Unix 秒）。"""
+    records: int
+    """上次同步之后库里有多少条。"""
+
+
 def _bind(engine: SQLiteEngine) -> None:
     """把表绑到调用者给的 engine 上。
 
@@ -142,8 +513,8 @@ def _bind(engine: SQLiteEngine) -> None:
         table._meta.db = engine  # pyright: ignore[reportPrivateUsage]
 
 
-async def open_database(path: Path) -> SQLiteEngine:
-    """打开本地库，表不存在就建。**不建默认路径** —— 路径由调用者给。"""
+async def open_database(path: Path) -> Store:
+    """打开本地库，表不存在就建，返回 :class:`Store`。**不建默认路径** —— 路径由调用者给。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     engine = SQLiteEngine(path=str(path))
     _bind(engine)
@@ -151,7 +522,7 @@ async def open_database(path: Path) -> SQLiteEngine:
     await SyncCursor.create_table(if_not_exists=True)
     await LocalVisitRow.create_table(if_not_exists=True)
     await _enforce_record_identity(engine)
-    return engine
+    return Store(engine)
 
 
 _RECORD_IDENTITY_INDEX: Final = "ux_sync_records_collection_record_id"
@@ -199,107 +570,6 @@ async def _enforce_record_identity(engine: SQLiteEngine) -> None:
     )
 
 
-async def store_batches(
-    engine: SQLiteEngine, batches: Sequence[CollectionBatch]
-) -> dict[str, ApplyResult]:
-    """**一次事务**里写入多个 collection —— 要么全成，要么一个字节都不写。
-
-    为什么要一次事务：``history`` 写进去了、``crypto/keys`` 没写进去，
-    库就处于"有数据但解不开"的半截状态 —— 那比什么都没有更让人困惑。
-    """
-    _bind(engine)
-    results: dict[str, ApplyResult] = {}
-    async with engine.transaction():
-        for batch in batches:
-            results[batch.collection] = await _write_one(engine, batch)
-    return results
-
-
-async def _write_one(engine: SQLiteEngine, batch: CollectionBatch) -> ApplyResult:
-    """写一个 collection。**调用方负责事务。**"""
-    if batch.full:
-        return await _replace(engine, batch.collection, batch.records)
-    return await _apply(engine, batch.collection, batch.records)
-
-
-async def _replace(
-    engine: SQLiteEngine, collection: str, records: Sequence[EncryptedBso]
-) -> ApplyResult:
-    """整体替换：删了重插。全量拉取用这个 —— 天然幂等，也不会留下上一轮已删的记录。
-
-    ``deleted`` 报的是**真的没了的那部分**（老行里没被重插的）—— ``--full`` 的对账
-    就靠它：agent 问"全量之后什么被删了"，答案不能永远是 0。
-
-    同一批里同 id 出现多次时与增量一样只认最新的一条（跨页重复不该把整次同步打翻）。
-    """
-    live = [record for record in _newest_per_id(records) if record.payload is not None]
-    rows = [_row(collection, record) for record in live]
-    after = {record.id for record in live}
-    before = {
-        str(row["record_id"])
-        for row in await SyncRecord.select(SyncRecord.record_id).where(
-            SyncRecord.collection == collection
-        )
-    }
-    await SyncRecord.delete().where(SyncRecord.collection == collection)
-    if rows:
-        await SyncRecord.insert(*rows)
-    return ApplyResult(
-        inserted=len(after - before),
-        updated=len(after & before),
-        deleted=len(before - after),
-    )
-
-
-async def _apply(
-    engine: SQLiteEngine, collection: str, records: Sequence[EncryptedBso]
-) -> ApplyResult:
-    """增量 upsert：新记录插入、更新的覆盖、墓碑删行。
-
-    增量拉回来的只是**变更集**，所以不能像全量那样"删了重插" ——
-    那会把没变更的几千条一起端掉。
-
-    **只在 ``modified`` 更新时才覆盖**：变更集里混进一条旧的（服务器重发、
-    两份导出交叉）不能把库里的新数据盖回去。同一批里同 id 出现多次时，
-    只有最新的那条算数 —— 库里的唯一索引不接受两行。
-    """
-    existing = {
-        str(row["record_id"]): (int(row["id"]), float(row["modified"]))
-        for row in await SyncRecord.select(
-            SyncRecord.id, SyncRecord.record_id, SyncRecord.modified
-        ).where(SyncRecord.collection == collection)
-    }
-
-    fresh: list[SyncRecord] = []
-    updates: list[tuple[int, EncryptedBso]] = []
-    removals: list[int] = []
-    for record in _newest_per_id(records):
-        entry = existing.get(record.id)
-        if record.payload is None:
-            if entry is not None:
-                removals.append(entry[0])
-        elif entry is None:
-            fresh.append(_row(collection, record))
-        elif record.modified > entry[1]:
-            updates.append((entry[0], record))
-
-    if fresh:
-        await SyncRecord.insert(*fresh)
-    for row_id, record in updates:
-        await SyncRecord.update(
-            {
-                SyncRecord.modified: record.modified,
-                SyncRecord.payload: record.payload,
-                SyncRecord.sortindex: record.sortindex,
-                SyncRecord.ttl: record.ttl,
-            }
-        ).where(SyncRecord.id == row_id)
-    if removals:
-        await SyncRecord.delete().where(SyncRecord.id.is_in(removals))
-
-    return ApplyResult(inserted=len(fresh), updated=len(updates), deleted=len(removals))
-
-
 def _newest_per_id(records: Sequence[EncryptedBso]) -> list[EncryptedBso]:
     """同一批里同 id 出现多次时只留最新的（``modified`` 大者胜，平手留后面的）。
 
@@ -314,17 +584,6 @@ def _newest_per_id(records: Sequence[EncryptedBso]) -> list[EncryptedBso]:
     return list(newest.values())
 
 
-async def replace_collection(
-    engine: SQLiteEngine, collection: str, records: Sequence[EncryptedBso]
-) -> int:
-    """用这一批记录整体替换**一个** collection，返回这次落进去多少条（新插 + 覆盖）。"""
-    result = await store_batches(
-        engine, [CollectionBatch(collection=collection, records=records, full=True)]
-    )
-    applied = result[collection]
-    return applied.inserted + applied.updated
-
-
 def _row(collection: str, record: EncryptedBso) -> SyncRecord:
     """一条记录 → 一行。"""
     return SyncRecord(
@@ -335,217 +594,6 @@ def _row(collection: str, record: EncryptedBso) -> SyncRecord:
         sortindex=record.sortindex,
         ttl=record.ttl,
     )
-
-
-async def load_cursor(engine: SQLiteEngine, collection: str) -> float | None:
-    """读游标。没有、或者值坏了（不是个数字）都返回 ``None`` —— 调用方回退到全量。
-
-    游标坏了就当没有：全量重拉一次是**安全**的，而拿着一个坏游标往下跑会**静默漏数据**。
-    """
-    _bind(engine)
-    rows = await SyncCursor.select(SyncCursor.last_modified).where(
-        SyncCursor.collection == collection
-    )
-    if not rows:
-        return None
-    value = rows[0]["last_modified"]
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return None
-    return float(value)
-
-
-async def save_cursor(
-    engine: SQLiteEngine,
-    collection: str,
-    *,
-    last_modified: float,
-    synced_at: float,
-    records: int,
-) -> None:
-    """推进游标。**只在一次完整拉取成功之后调**。"""
-    _bind(engine)
-    async with engine.transaction():
-        await SyncCursor.delete().where(SyncCursor.collection == collection)
-        await SyncCursor.insert(
-            SyncCursor(
-                collection=collection,
-                last_modified=last_modified,
-                synced_at=synced_at,
-                records=records,
-            )
-        )
-
-
-async def load_records(engine: SQLiteEngine, collection: str) -> list[tuple[str, str | None]]:
-    """读一个 collection 的 ``(record_id, payload)``。"""
-    _bind(engine)
-    rows = await SyncRecord.select(SyncRecord.record_id, SyncRecord.payload).where(
-        SyncRecord.collection == collection
-    )
-    return [(str(row["record_id"]), row["payload"]) for row in rows]
-
-
-async def count_records(engine: SQLiteEngine, collection: str) -> int:
-    """库里这个 collection 现在有多少条。"""
-    _bind(engine)
-    return await SyncRecord.count().where(SyncRecord.collection == collection)
-
-
-@dataclass(frozen=True, slots=True)
-class CursorInfo:
-    """一个 collection 的同步进度。"""
-
-    collection: str
-    last_modified: float
-    """服务器给的 collection 时间戳（下次增量拉取的起点）。"""
-    synced_at: float
-    """上次同步完成的时间（Unix 秒）。"""
-    records: int
-    """上次同步之后库里有多少条。"""
-
-
-async def load_cursors(engine: SQLiteEngine) -> tuple[CursorInfo, ...]:
-    """所有 collection 的同步进度 —— 没同步过的 collection 不在里面。"""
-    _bind(engine)
-    rows = await SyncCursor.select().order_by(SyncCursor.collection)
-    return tuple(
-        CursorInfo(
-            collection=str(row["collection"]),
-            last_modified=float(row["last_modified"]),
-            synced_at=float(row["synced_at"]),
-            records=int(row["records"]),
-        )
-        for row in rows
-    )
-
-
-async def store_local_visits(engine: SQLiteEngine, visits: Sequence[StoredVisit]) -> ApplyResult:
-    """写入本地访问。**幂等** —— 同一份导出再导一次，条数不会翻倍。
-
-    认"同一次访问"靠 ``(machine, url, visited_at)``：那个自增主键在"删了重插"之后会
-    重排（实测），拿它当身份会串行。同一批里重复出现的也在这里顺手去重。
-
-    标题变了算 ``updated``（Firefox 会改标题，那是同一次访问，不该多出一行）。
-    """
-    _bind(engine)
-    existing = {
-        (str(row["machine"]), str(row["url"]), int(row["visited_at"])): (
-            row["id"],
-            str(row["title"]),
-        )
-        for row in await LocalVisitRow.select(
-            LocalVisitRow.id,
-            LocalVisitRow.machine,
-            LocalVisitRow.url,
-            LocalVisitRow.visited_at,
-            LocalVisitRow.title,
-        )
-    }
-
-    fresh: list[LocalVisitRow] = []
-    updates: list[tuple[int, str]] = []
-    seen: set[tuple[str, str, int]] = set()
-    for item in visits:
-        key = (item.machine, item.url, to_microseconds(item.visited_at))
-        if key in seen:
-            continue
-        seen.add(key)
-        found = existing.get(key)
-        if found is None:
-            fresh.append(
-                LocalVisitRow(
-                    machine=item.machine,
-                    url=item.url,
-                    title=item.title,
-                    visited_at=key[2],
-                    visit_type=item.visit_type,
-                )
-            )
-        elif found[1] != item.title:
-            updates.append((found[0], item.title))
-
-    if fresh:
-        await LocalVisitRow.insert(*fresh)
-    for row_id, title in updates:
-        await LocalVisitRow.update({LocalVisitRow.title: title}).where(LocalVisitRow.id == row_id)
-
-    return ApplyResult(inserted=len(fresh), updated=len(updates), deleted=0)
-
-
-async def load_local_visits(engine: SQLiteEngine) -> tuple[StoredVisit, ...]:
-    """读出全部本地访问，按时间升序。**没导入过就是空元组** —— 单源降级走这条路。"""
-    _bind(engine)
-    rows = await LocalVisitRow.select().order_by(LocalVisitRow.visited_at)
-    return tuple(
-        StoredVisit(
-            machine=str(row["machine"]),
-            url=str(row["url"]),
-            title=str(row["title"]),
-            visited_at=from_microseconds(int(row["visited_at"])),
-            visit_type=int(row["visit_type"]),
-        )
-        for row in rows
-    )
-
-
-async def merge_sync_records(
-    engine: SQLiteEngine, records: Sequence[PortableRecord]
-) -> tuple[ApplyResult, int]:
-    """把导出来的云端记录并进库。返回 ``(落库的账, 被保住没动的条数)``。
-
-    **只在导出的那条更新时才覆盖。** 目标机器可能自己 sync 过、比这份导出还新 ——
-    拿旧数据把新数据盖回去是不可逆的损失，所以这里认 ``modified``，不是无脑 upsert。
-
-    墓碑（``payload`` 为 ``None``）直接跳过：库里的约定是"有行 == 这条记录存在"
-    （见本模块开头的说明），收下一条空记录会把这个约定捅破。
-    """
-    _bind(engine)
-    existing = {
-        (str(row["collection"]), str(row["record_id"])): float(row["modified"])
-        for row in await SyncRecord.select(
-            SyncRecord.collection, SyncRecord.record_id, SyncRecord.modified
-        )
-    }
-
-    fresh: list[SyncRecord] = []
-    updates: list[PortableRecord] = []
-    kept = 0
-    for item in _newest_per_record(records):
-        if item.payload is None:
-            kept += 1
-            continue
-        current = existing.get((item.collection, item.record_id))
-        if current is None:
-            fresh.append(
-                SyncRecord(
-                    collection=item.collection,
-                    record_id=item.record_id,
-                    modified=item.modified,
-                    payload=item.payload,
-                    sortindex=item.sortindex,
-                    ttl=item.ttl,
-                )
-            )
-        elif item.modified > current:
-            updates.append(item)
-        else:
-            kept += 1
-
-    if fresh:
-        await SyncRecord.insert(*fresh)
-    for item in updates:
-        await SyncRecord.update(
-            {
-                SyncRecord.modified: item.modified,
-                SyncRecord.payload: item.payload,
-                SyncRecord.sortindex: item.sortindex,
-                SyncRecord.ttl: item.ttl,
-            }
-        ).where(
-            (SyncRecord.collection == item.collection) & (SyncRecord.record_id == item.record_id)
-        )
-
-    return ApplyResult(inserted=len(fresh), updated=len(updates), deleted=0), kept
 
 
 def _newest_per_record(records: Sequence[PortableRecord]) -> list[PortableRecord]:
@@ -560,25 +608,3 @@ def _newest_per_record(records: Sequence[PortableRecord]) -> list[PortableRecord
         if current is None or item.modified >= current.modified:
             newest[key] = item
     return list(newest.values())
-
-
-async def merge_sync_cursors(engine: SQLiteEngine, cursors: Sequence[PortableCursor]) -> int:
-    """推进游标，返回推进了几个。
-
-    **只往前推。** 旧游标会把已经拉过的区间重拉一遍；更糟的是把"上次同步到哪儿"
-    这个判断依据改小 —— 那之后真正的增量就再也不会去拉了。
-    """
-    advanced = 0
-    for item in cursors:
-        current = await load_cursor(engine, item.collection)
-        if current is not None and item.last_modified <= current:
-            continue
-        await save_cursor(
-            engine,
-            item.collection,
-            last_modified=item.last_modified,
-            synced_at=item.synced_at,
-            records=item.records,
-        )
-        advanced += 1
-    return advanced

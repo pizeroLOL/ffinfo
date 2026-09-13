@@ -30,14 +30,7 @@ from ffinfo.storage import (
     FetchProgress,
     SyncStorageClient,
 )
-from ffinfo_cli.store import (
-    CollectionBatch,
-    count_records,
-    load_cursor,
-    open_database,
-    save_cursor,
-    store_batches,
-)
+from ffinfo_cli.store import CollectionBatch, open_database
 
 _HTTP_TIMEOUT_SECONDS: Final = 60.0
 
@@ -145,14 +138,14 @@ async def run_sync(
     )
 
     started = clock()
-    engine = await open_database(database_path)
+    store = await open_database(database_path)
     targets = (collection, *_PROTOCOL_COLLECTIONS)
 
     cursors: dict[str, float | None] = {}
     fetches: dict[str, CollectionFetch] = {}
     batches: list[CollectionBatch] = []
     for name in targets:
-        cursor = None if full else await load_cursor(engine, name)
+        cursor = None if full else await store.load_cursor(name)
         cursors[name] = cursor
         fetch = await client.fetch_collection(
             name, page_size=page_size, newer=cursor, on_progress=on_progress
@@ -160,16 +153,15 @@ async def run_sync(
         fetches[name] = fetch
         batches.append(CollectionBatch(collection=name, records=fetch.records, full=cursor is None))
 
-    results = await store_batches(engine, batches)
+    results = await store.store_batches(batches)
 
     now = clock()
     for name in targets:
-        await save_cursor(
-            engine,
+        await store.save_cursor(
             name,
             last_modified=fetches[name].last_modified,
             synced_at=now,
-            records=await count_records(engine, name),
+            records=await store.count_records(name),
         )
 
     main = fetches[collection]
@@ -177,7 +169,7 @@ async def run_sync(
     return SyncReport(
         collection=collection,
         mode="full" if cursors[collection] is None else "incremental",
-        records=await count_records(engine, collection),
+        records=await store.count_records(collection),
         inserted=applied.inserted,
         updated=applied.updated,
         deleted=applied.deleted,

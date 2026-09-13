@@ -24,8 +24,6 @@ from ffinfo_cli.store import (
     CollectionBatch,
     StoredVisit,
     open_database,
-    store_batches,
-    store_local_visits,
 )
 from support import us_of as micros
 
@@ -184,8 +182,8 @@ async def build_db(
         batches.append(CollectionBatch(collection="bookmarks", records=bookmarks, full=True))
     if tabs is not None:
         batches.append(CollectionBatch(collection="tabs", records=tabs, full=True))
-    engine = await open_database(tmp_path / "db.sqlite")
-    await store_batches(engine, batches)
+    store = await open_database(tmp_path / "db.sqlite")
+    await store.store_batches(batches)
 
 
 async def run(tmp_path: Path, **kwargs: object) -> ListReport:
@@ -305,9 +303,8 @@ async def test_everything_unreadable_means_the_wrong_account(tmp_path: Path) -> 
 
 async def test_missing_keys_record_says_what_to_do(tmp_path: Path) -> None:
     """库里没有 crypto/keys —— 得说清楚"先跑 sync"，而不是抛个 KeyError。"""
-    engine = await open_database(tmp_path / "db.sqlite")
-    await store_batches(
-        engine,
+    store = await open_database(tmp_path / "db.sqlite")
+    await store.store_batches(
         [CollectionBatch(collection="history", records=[history_record("rec")], full=True)],
     )
 
@@ -478,8 +475,8 @@ def local_visit(
 
 async def add_local(tmp_path: Path, visits: list[StoredVisit]) -> None:
     """往同一个库里写本地源 —— 分表，与 sync_records 互不干扰。"""
-    engine = await open_database(tmp_path / "db.sqlite")
-    await store_local_visits(engine, visits)
+    store = await open_database(tmp_path / "db.sqlite")
+    await store.store_local_visits(visits)
 
 
 async def test_local_source_alone_is_usable(tmp_path: Path) -> None:

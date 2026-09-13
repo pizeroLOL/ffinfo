@@ -98,15 +98,9 @@ reportMissingTypeStubs = false
 # 测试向量模块（packages/ffinfo/tests/vectors.py）不在包内，显式告诉 pyright 去哪找
 extraPaths = ["packages/ffinfo/tests"]
 
-# pyrage / piccolo 的 wheel 里没有 .pyi / py.typed，于是它们的每个成员都是 unknown，
-# 下游一路飘红。**先豁免，把"自己写的类型"这层检查保住**；
-# 补存根（治本）记在待办里，补完就把这几条开回来。
-reportUnknownMemberType = false
-reportUnknownVariableType = false
-reportUnknownArgumentType = false
-reportUnknownParameterType = false
-reportUnknownLambdaType = false
-reportAttributeAccessIssue = false
+# pyrage / piccolo 的 wheel 里没有 .pyi / py.typed —— unknown 系列**按文件豁免**：
+# 只有真正碰这两个依赖的文件（credentials.py / store.py + 三个直接查表的测试）带
+# `# pyright:` 指令，其余文件照常检查。补存根（治本）记在待办里，补完把指令删掉。
 
 [tool.pytest.ini_options]
 testpaths = ["packages/*/tests"]

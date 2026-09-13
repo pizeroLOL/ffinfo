@@ -37,12 +37,7 @@ from ffinfo_cli.portable import (
 )
 from ffinfo_cli.store import (
     StoredVisit,
-    SyncCursor,
-    SyncRecord,
-    merge_sync_cursors,
-    merge_sync_records,
     open_database,
-    store_local_visits,
 )
 
 __all__ = [
@@ -184,10 +179,9 @@ async def run_import(
     """
     started = clock()
     portable = read_portable(source)
-    engine = await open_database(database_path)
+    store = await open_database(database_path)
 
-    visits = await store_local_visits(
-        engine,
+    visits = await store.store_local_visits(
         [
             StoredVisit(
                 machine=portable.meta.machine,
@@ -199,8 +193,8 @@ async def run_import(
             for item in portable.visits
         ],
     )
-    records, kept = await merge_sync_records(engine, portable.records)
-    advanced = await merge_sync_cursors(engine, portable.cursors)
+    records, kept = await store.merge_sync_records(portable.records)
+    advanced = await store.merge_sync_cursors(portable.cursors)
 
     return ImportReport(
         source=str(source),
@@ -224,28 +218,9 @@ async def _cloud_state(
     """把本地库里的云端状态读出来。库还不存在（没 login / sync 过）就返回空的。"""
     if not database_path.is_file():
         return (), ()
-    # 打开即完成建表与绑定 —— 下面的 select 走的是绑在表类上的那个 engine
-    await open_database(database_path)
-    records = tuple(
-        PortableRecord(
-            collection=str(row["collection"]),
-            record_id=str(row["record_id"]),
-            modified=float(row["modified"]),
-            payload=None if row["payload"] is None else str(row["payload"]),
-            sortindex=None if row["sortindex"] is None else int(row["sortindex"]),
-            ttl=None if row["ttl"] is None else int(row["ttl"]),
-        )
-        for row in await SyncRecord.select().order_by(SyncRecord.collection, SyncRecord.record_id)
-    )
-    cursors = tuple(
-        PortableCursor(
-            collection=str(row["collection"]),
-            last_modified=float(row["last_modified"]),
-            synced_at=float(row["synced_at"]),
-            records=int(row["records"]),
-        )
-        for row in await SyncCursor.select()
-    )
+    store = await open_database(database_path)
+    records = await store.load_all_records()
+    cursors = await store.load_all_cursors()
     return records, cursors
 
 

@@ -3,6 +3,11 @@
 全部离线：HTTP 走 ``httpx.MockTransport``，凭据写进临时目录。
 """
 
+# 上面三行：同上 —— 测试直接查表类验证落库结果。
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
+# pyright: reportUnknownArgumentType=false, reportUnknownParameterType=false
+# pyright: reportUnknownLambdaType=false, reportAttributeAccessIssue=false
+
 from __future__ import annotations
 
 import base64
@@ -17,7 +22,7 @@ from ffinfo.credentials import AgeIdentity, CredentialStore
 from ffinfo.errors import BackoffError, ConfigurationError, SyncProtocolError
 from ffinfo.keys import OLD_SYNC_SCOPE, ScopedKey
 from ffinfo.oauth import Credentials
-from ffinfo_cli.store import SyncCursor, SyncRecord, load_cursor, open_database
+from ffinfo_cli.store import SyncCursor, SyncRecord, open_database
 from ffinfo_cli.sync import SYNCABLE_COLLECTIONS, SyncReport, run_sync
 
 NOW = 1_789_320_612.0
@@ -111,8 +116,8 @@ async def cursor(tmp_path: Path, collection: str = "history") -> float | None:
     """当前的同步游标 —— 没有就是 ``None``。"""
     if not (tmp_path / "db.sqlite").exists():
         return None
-    engine = await open_database(tmp_path / "db.sqlite")
-    return await load_cursor(engine, collection)
+    store = await open_database(tmp_path / "db.sqlite")
+    return await store.load_cursor(collection)
 
 
 async def sync(
@@ -171,9 +176,8 @@ async def test_happy_path_stores_records(tmp_path: Path) -> None:
     assert report.server_count == 2
     assert report.database == str(tmp_path / "db.sqlite")
 
-    engine = await open_database(tmp_path / "db.sqlite")
+    await open_database(tmp_path / "db.sqlite")
     assert await SyncRecord.count().where(SyncRecord.collection == "history") == 2
-    del engine
 
 
 async def test_protocol_data_is_pulled_alongside(tmp_path: Path) -> None:
@@ -185,10 +189,9 @@ async def test_protocol_data_is_pulled_alongside(tmp_path: Path) -> None:
     report = await sync(tmp_path, fake)
 
     assert report.protocol == {"crypto": 1}
-    engine = await open_database(tmp_path / "db.sqlite")
+    await open_database(tmp_path / "db.sqlite")
     stored = await SyncRecord.select().where(SyncRecord.collection == "crypto")
     assert [row["record_id"] for row in stored] == ["keys"]
-    del engine
 
 
 async def test_tombstones_are_counted_and_dropped(tmp_path: Path) -> None:

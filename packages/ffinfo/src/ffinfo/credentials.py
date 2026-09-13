@@ -6,6 +6,11 @@
 用 pyrage 而不是外部 ``age`` 二进制：不要求用户预装东西。
 """
 
+# 上面三行：pyrage 的 wheel 没有 .pyi / py.typed，它整个 surface 都是 unknown。
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
+# pyright: reportUnknownArgumentType=false, reportUnknownParameterType=false
+# pyright: reportUnknownLambdaType=false, reportAttributeAccessIssue=false
+
 from __future__ import annotations
 
 import os

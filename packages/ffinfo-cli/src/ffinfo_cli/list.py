@@ -37,7 +37,6 @@ from pathlib import Path
 from typing import Any, ClassVar, Final, Literal
 from urllib.parse import urlsplit
 
-from piccolo.engine.sqlite import SQLiteEngine
 from pydantic import BaseModel, ConfigDict
 
 from ffinfo.bookmarks import BookmarkNode, parse_bookmarks
@@ -47,7 +46,7 @@ from ffinfo.history import HistoryEntry, decrypt_history, visit_type_name
 from ffinfo.keys import CollectionKeys
 from ffinfo.tabs import ClientTabs, TabEntry, parse_tabs
 from ffinfo.timestamps import to_microseconds
-from ffinfo_cli.store import StoredVisit, load_local_visits, load_records, open_database
+from ffinfo_cli.store import Store, StoredVisit, open_database
 from ffinfo_cli.sync import load_credentials
 
 _KEYS_RECORD_ID: Final = "keys"
@@ -195,11 +194,11 @@ async def run_list(
         raise ConfigurationError(msg)
 
     credentials = load_credentials(identity_path=identity_path, credentials_path=credentials_path)
-    engine = await open_database(database_path)
-    key = await _collection_key(engine, credentials.sync_key_bundle(), data_type)
-    records = await load_records(engine, data_type)
+    store = await open_database(database_path)
+    key = await _collection_key(store, credentials.sync_key_bundle(), data_type)
+    records = await store.load_records(data_type)
     # 本地源只有历史这一种 —— 书签与标签页是云端独有
-    local = await load_local_visits(engine) if data_type == "history" else ()
+    local = await store.load_local_visits() if data_type == "history" else ()
 
     common = {
         "generated_at": datetime.fromtimestamp(clock(), tz=UTC).isoformat(),
@@ -511,9 +510,9 @@ def _counts(nodes: Sequence[BookmarkNode]) -> dict[str, int]:
     return tally
 
 
-async def _collection_key(engine: SQLiteEngine, root_key: KeyBundle, collection: str) -> KeyBundle:
+async def _collection_key(store: Store, root_key: KeyBundle, collection: str) -> KeyBundle:
     """从库里的 ``crypto/keys`` 解出目标 collection 用的那一对密钥。"""
-    crypto = await load_records(engine, "crypto")
+    crypto = await store.load_records("crypto")
     payload = next((record for record_id, record in crypto if record_id == _KEYS_RECORD_ID), None)
     if payload is None:
         msg = (

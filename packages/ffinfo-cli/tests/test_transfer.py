@@ -5,6 +5,11 @@
 测试（``test_places*`` / ``test_portable``），这里只关心它们接起来对不对。
 """
 
+# 上面三行：同上 —— 测试直接查表类验证落库结果。
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
+# pyright: reportUnknownArgumentType=false, reportUnknownParameterType=false
+# pyright: reportUnknownLambdaType=false, reportAttributeAccessIssue=false
+
 from __future__ import annotations
 
 import json
@@ -28,10 +33,7 @@ from ffinfo_cli.store import (
     CollectionBatch,
     SyncCursor,
     SyncRecord,
-    load_cursor,
-    load_local_visits,
     open_database,
-    store_batches,
 )
 from ffinfo_cli.transfer import (
     ExportReport,
@@ -99,9 +101,8 @@ async def test_export_carries_the_cloud_records_and_cursors(tmp_path: Path) -> N
     home = tmp_path / "home"
     profile_with_firefox(home, [("https://a.example/", "A", micros(DAY), 1)])
     database = tmp_path / "ffinfo.sqlite"
-    engine = await open_database(database)
-    await store_batches(
-        engine,
+    store = await open_database(database)
+    await store.store_batches(
         [CollectionBatch(collection="history", records=[record("rec-1")], full=True)],
     )
     await SyncCursor.insert(
@@ -220,9 +221,8 @@ async def test_import_does_not_downgrade_newer_cloud_data(tmp_path: Path) -> Non
         exported_at=MOMENT,
     )
     database = tmp_path / "db.sqlite"
-    engine = await open_database(database)
-    await store_batches(
-        engine,
+    store = await open_database(database)
+    await store.store_batches(
         [CollectionBatch(collection="history", records=[record("rec", modified=99.0)], full=True)],
     )
     await SyncCursor.insert(
@@ -233,7 +233,7 @@ async def test_import_does_not_downgrade_newer_cloud_data(tmp_path: Path) -> Non
 
     rows = await SyncRecord.select().where(SyncRecord.record_id == "rec")
     assert float(rows[0]["modified"]) == 99.0
-    assert await load_cursor(engine, "history") == 500.0
+    assert await store.load_cursor("history") == 500.0
 
 
 def record(record_id: str, *, modified: float = 1.0) -> EncryptedBso:
@@ -269,8 +269,8 @@ async def test_export_then_import_then_query(tmp_path: Path) -> None:
     report = await run_import(database_path=target_home / "db.sqlite", source=portable)
 
     assert report.visits_inserted == 2
-    engine = await open_database(target_home / "db.sqlite")
-    stored = await load_local_visits(engine)
+    store = await open_database(target_home / "db.sqlite")
+    stored = await store.load_local_visits()
     assert [item.url for item in stored] == ["https://a.example/", "https://b.example/"]
     assert stored[0].machine == "test-laptop"
 
