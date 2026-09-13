@@ -12,6 +12,12 @@
 | ``bookmarks`` | **树** | 父子层级是书签的主要信息，拍平就没了 |
 | ``tabs`` | 按设备分组 | 一个 BSO 就是一台设备 |
 
+**历史是双源的**：云端 Sync 拉下来的（``sync_records``，要解密）和本地 ``places.sqlite``
+导入进来的（``local_visits``，本来就是明文）在查询时合并。合并按
+``(url, 访问时刻)`` —— **逐微秒相等才算同一次访问**，这样"两个源都有"的那条只出一行、
+标成 ``both``，而不是重复两行。只有一边有就照常出，标 ``sync`` 或 ``local``。
+本地源是空的（目标机器没导入过）就自然降级成单源，不用特判。
+
 两个约定，别混：
 
 * **输出**的时间一律是 **UTC**（带偏移量，无歧义，跟在哪儿跑无关）
@@ -25,9 +31,10 @@ import asyncio
 import json
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar, Final, Self
+from typing import Any, ClassVar, Final
 from urllib.parse import urlsplit
 
 from piccolo.engine.sqlite import SQLiteEngine
@@ -36,10 +43,11 @@ from pydantic import BaseModel, ConfigDict
 from ffinfo.bookmarks import BookmarkNode, parse_bookmarks
 from ffinfo.crypto import EncryptedPayload, KeyBundle
 from ffinfo.errors import ConfigurationError, DecryptionError
-from ffinfo.history import HistoryEntry, decrypt_history
+from ffinfo.history import HistoryEntry, decrypt_history, visit_type_name
 from ffinfo.keys import CollectionKeys
 from ffinfo.tabs import ClientTabs, TabEntry, parse_tabs
-from ffinfo_cli.store import load_records, open_database
+from ffinfo_cli._time import to_microseconds
+from ffinfo_cli.store import StoredVisit, load_local_visits, load_records, open_database
 from ffinfo_cli.sync import load_credentials
 
 _KEYS_RECORD_ID: Final = "keys"
@@ -70,19 +78,12 @@ class HistoryItem(BaseModel):
     """ISO 8601，UTC。"""
     visit_type: int
     visit_type_name: str
-    record_id: str
-
-    @classmethod
-    def from_history(cls, entry: HistoryEntry) -> Self:
-        """从库层的记录转成输出形态。"""
-        return cls(
-            url=entry.url,
-            title=entry.title,
-            visited_at=entry.visited_at.isoformat(),
-            visit_type=entry.visit_type,
-            visit_type_name=entry.visit_type_name,
-            record_id=entry.record_id,
-        )
+    record_id: str | None
+    """云端那条记录的 GUID。**本地源来的是 ``null``** —— 它压根没有这个 id。"""
+    source: str
+    """这条打哪儿来：``sync``（云端）· ``local``（本地 places）· ``both``（两边都有）。"""
+    source_machine: str | None
+    """本地源那边导出它的机器名。``source`` 是 ``sync`` 时是 ``null``。"""
 
 
 class ListReport(BaseModel):
@@ -90,14 +91,19 @@ class ListReport(BaseModel):
 
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
 
-    format_version: int = 1
+    format_version: int = 2
+    """**2**：历史条目加了 ``source`` / ``source_machine``，``record_id`` 可为 null。"""
     data_type: str
     generated_at: str
     filters: dict[str, str | int | None]
     records: int
     """库里读出来的记录条数。"""
     visits: int = 0
-    """``history`` 用：拍平后、过滤前的访问次数（一条记录可以有多次访问）。"""
+    """``history`` 用：**云端**拍平后、过滤前的访问次数（一条记录可以有多次访问）。"""
+    local_records: int = 0
+    """``history`` 用：本地源那边读出来多少条访问。"""
+    sources: list[str] = []
+    """实际出了数据的源（``sync`` / ``local``）。只有一个时就是**降级到单源**了。"""
     skipped: int
     """解密失败的记录条数 —— 单条坏掉不连坐。"""
     skipped_details: list[dict[str, str]] = []
@@ -170,6 +176,8 @@ async def run_list(
     engine = await open_database(database_path)
     key = await _collection_key(engine, credentials.sync_key_bundle(), data_type)
     records = await load_records(engine, data_type)
+    # 本地源只有历史这一种 —— 书签与标签页是云端独有
+    local = await load_local_visits(engine) if data_type == "history" else ()
 
     common = {
         "generated_at": datetime.fromtimestamp(clock(), tz=UTC).isoformat(),
@@ -185,7 +193,14 @@ async def run_list(
 
     if data_type == "history":
         return _history_report(
-            records, key, common, since=since, domain=domain, search=search, limit=limit
+            records,
+            key,
+            local,
+            common,
+            since=since,
+            domain=domain,
+            search=search,
+            limit=limit,
         )
     if data_type == "bookmarks":
         return _bookmark_report(
@@ -199,6 +214,7 @@ async def run_list(
 def _history_report(
     records: Sequence[tuple[str, str | None]],
     key: KeyBundle,
+    local: Sequence[StoredVisit],
     common: dict[str, Any],
     *,
     since: datetime | None,
@@ -206,31 +222,112 @@ def _history_report(
     search: str | None,
     limit: int | None,
 ) -> ListReport:
-    """历史：拍平成一次访问一行，最新的在前。"""
+    """历史：**两个源合并**，拍平成一次访问一行，最新的在前。"""
     decrypted = decrypt_history(records, key)
-    _guard_all_failed(decrypted.records, len(decrypted.entries), len(decrypted.skipped))
+    _guard_all_failed(
+        decrypted.records, len(decrypted.entries), len(decrypted.skipped), fallback=len(local)
+    )
 
-    selected = list(decrypted.entries)
+    selected = _merge_history(decrypted.entries, local)
     if since is not None:
-        selected = [entry for entry in selected if entry.visited_at >= since]
+        selected = [item for item in selected if item.visited_at >= since]
     if domain is not None:
-        selected = [entry for entry in selected if matches_domain(entry.url, domain)]
+        selected = [item for item in selected if matches_domain(item.url, domain)]
     if search is not None:
         selected = [
-            entry for entry in selected if matches_search(entry.url, entry.title, needle=search)
+            item for item in selected if matches_search(item.url, item.title, needle=search)
         ]
-    selected.sort(key=lambda entry: entry.visited_at, reverse=True)
+    selected.sort(key=lambda item: item.visited_at, reverse=True)
 
     returned = _truncate(selected, limit)
     return ListReport(
         **common,
         visits=len(decrypted.entries),
+        local_records=len(local),
+        sources=_sources(len(decrypted.entries), len(local)),
         skipped=len(decrypted.skipped),
         skipped_details=_details(decrypted.skipped),
         matched=len(selected),
         returned=len(returned),
-        items=[HistoryItem.from_history(entry) for entry in returned],
+        items=[_item(item) for item in returned],
     )
+
+
+@dataclass(frozen=True, slots=True)
+class _MergedVisit:
+    """合并之后、还没转成输出形态的一条访问。"""
+
+    url: str
+    title: str
+    visited_at: datetime
+    visit_type: int
+    record_id: str | None
+    source: str
+    machine: str | None
+
+
+def _merge_history(
+    entries: Sequence[HistoryEntry], local: Sequence[StoredVisit]
+) -> list[_MergedVisit]:
+    """把云端与本地两个源并成一个列表。
+
+    **认"同一次访问"靠 ``(url, 微秒)``。** 云端那条的时刻来自记录里的 ``date``，
+    本地那条来自 ``moz_historyvisits.visit_date`` —— 两边都是 PRTime 微秒，
+    所以只要换算不引入误差，它们就能精确对上。这也是 ``_time`` 里坚持走整数运算的原因：
+    差 1 微秒，同一次访问就会出两行。
+    """
+    merged: dict[tuple[str, int], _MergedVisit] = {}
+    for entry in entries:
+        merged[(entry.url, to_microseconds(entry.visited_at))] = _MergedVisit(
+            url=entry.url,
+            title=entry.title,
+            visited_at=entry.visited_at,
+            visit_type=entry.visit_type,
+            record_id=entry.record_id,
+            source="sync",
+            machine=None,
+        )
+
+    for item in local:
+        key = (item.url, to_microseconds(item.visited_at))
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = _MergedVisit(
+                url=item.url,
+                title=item.title,
+                visited_at=item.visited_at,
+                visit_type=item.visit_type,
+                record_id=None,
+                source="local",
+                machine=item.machine,
+            )
+            continue
+        merged[key] = replace(
+            existing,
+            # 本地那条没标题时，别把云端已有的标题丢了
+            title=existing.title or item.title,
+            source="both",
+            machine=item.machine,
+        )
+    return list(merged.values())
+
+
+def _item(visit: _MergedVisit) -> HistoryItem:
+    return HistoryItem(
+        url=visit.url,
+        title=visit.title,
+        visited_at=visit.visited_at.isoformat(),
+        visit_type=visit.visit_type,
+        visit_type_name=visit_type_name(visit.visit_type),
+        record_id=visit.record_id,
+        source=visit.source,
+        source_machine=visit.machine,
+    )
+
+
+def _sources(sync_visits: int, local_visits: int) -> list[str]:
+    """哪些源真的出了数据 —— 只剩一个就说明这次是**单源降级**。"""
+    return [name for name, count in (("sync", sync_visits), ("local", local_visits)) if count]
 
 
 def _bookmark_report(
@@ -329,9 +426,13 @@ def _tabs_report(
     )
 
 
-def _guard_all_failed(records: int, produced: int, skipped: int) -> None:
-    """一条都解不开时别装没事 —— 多半是换了账号。"""
-    if records and not produced and skipped == records:
+def _guard_all_failed(records: int, produced: int, skipped: int, *, fallback: int = 0) -> None:
+    """一条都解不开时别装没事 —— 多半是换了账号。
+
+    ``fallback`` 是有本地源兜底时的条数：那种情况下查询仍有结果，
+    拦下来反而把用户自己的本地数据也一起藏了（报告里的 ``skipped`` 照样会写）。
+    """
+    if records and not produced and skipped == records and not fallback:
         msg = (
             "库里的记录一条都解不开 —— 多半是这份凭据和库里的数据不是同一个账号"
             "（换了账号就重新 login 再 sync）"

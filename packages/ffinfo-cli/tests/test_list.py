@@ -20,7 +20,13 @@ from ffinfo.keys import OLD_SYNC_SCOPE, ScopedKey
 from ffinfo.oauth import Credentials
 from ffinfo.storage import EncryptedBso
 from ffinfo_cli.list import matches_domain, matches_search, parse_since, run_list
-from ffinfo_cli.store import CollectionBatch, open_database, store_batches
+from ffinfo_cli.store import (
+    CollectionBatch,
+    StoredVisit,
+    open_database,
+    store_batches,
+    store_local_visits,
+)
 
 KSYNC = bytes(range(64))
 """凭据里那把 kSync —— 与 ``test_sync.py`` 用的是同一把。"""
@@ -189,7 +195,8 @@ async def test_output_carries_format_version_and_filters(tmp_path: Path) -> None
     report = await run(tmp_path, domain="example.com")  # type: ignore[assignment]
     payload = json.loads(report.to_json())
 
-    assert payload["format_version"] == 1
+    assert "format_version" in payload
+    assert payload["filters"]["domain"] == "example.com"
     assert payload["filters"]["domain"] == "example.com"
     assert payload["filters"]["limit"] is None
     assert payload["generated_at"] == "2026-09-13T17:30:12+00:00"
@@ -404,3 +411,177 @@ def test_matches_search_covers_several_fields_case_insensitively() -> None:
     assert matches_search("标题", "https://rust-lang.org/", needle="rust")
     assert not matches_search("别的", "https://x.test/", needle="rust")
     assert not matches_search(None, None, needle="rust")
+
+
+# ── 双源合并（08 号 ticket） ───────────────────────────────────────────────
+
+
+def local_visit(
+    url: str = "https://example.com/",
+    *,
+    when: datetime = DAY,
+    title: str = "Example",
+    machine: str = "test-laptop",
+    visit_type: int = 1,
+) -> StoredVisit:
+    return StoredVisit(
+        machine=machine, url=url, title=title, visited_at=when, visit_type=visit_type
+    )
+
+
+async def add_local(tmp_path: Path, visits: list[StoredVisit]) -> None:
+    """往同一个库里写本地源 —— 分表，与 sync_records 互不干扰。"""
+    engine = await open_database(tmp_path / "db.sqlite")
+    await store_local_visits(engine, visits)
+
+
+async def test_local_source_alone_is_usable(tmp_path: Path) -> None:
+    """目标机器上只有 import 进来的本地数据、云端那条记录也没解出访问 —— 照样能查。"""
+    await build_db(tmp_path, [])
+    await add_local(tmp_path, [local_visit("https://local.test/")])
+
+    report = await run(tmp_path)  # type: ignore[assignment]
+
+    assert [item.url for item in report.items] == ["https://local.test/"]
+    assert report.items[0].source == "local"
+    assert report.items[0].record_id is None
+
+
+async def test_sync_source_alone_still_works(tmp_path: Path) -> None:
+    """**降级到单源**：一台没导入过任何本地数据的机器，查询照常。"""
+    await build_db(tmp_path, [history_record("rec", url="https://cloud.test/")])
+
+    report = await run(tmp_path)  # type: ignore[assignment]
+
+    assert [item.url for item in report.items] == ["https://cloud.test/"]
+    assert report.items[0].source == "sync"
+    assert report.items[0].source_machine is None
+    assert report.sources == ["sync"]
+    assert report.local_records == 0
+
+
+async def test_the_same_visit_from_both_sources_is_one_row(tmp_path: Path) -> None:
+    """**这张票的核心**：同一次访问两个源都有 —— 只出一行，标成 both。
+
+    能对上的前提是两边的微秒**完全相等**：云端那条走 ``date / 1e6`` 的浮点换算，
+    本地这条走整数换算。这条测试就是那个不变量的看门人。
+    """
+    await build_db(tmp_path, [history_record("rec", url="https://both.test/", visits=[(DAY, 1)])])
+    await add_local(tmp_path, [local_visit("https://both.test/", when=DAY)])
+
+    report = await run(tmp_path)  # type: ignore[assignment]
+
+    assert report.returned == 1
+    assert report.items[0].source == "both"
+    assert report.items[0].record_id == "rec"
+    assert report.items[0].source_machine == "test-laptop"
+
+
+async def test_a_different_visit_at_the_same_url_is_a_second_row(tmp_path: Path) -> None:
+    """同一个 URL、**不同时刻**是两次访问 —— 不能合并掉。"""
+    await build_db(tmp_path, [history_record("rec", url="https://both.test/", visits=[(DAY, 1)])])
+    await add_local(tmp_path, [local_visit("https://both.test/", when=DAY + timedelta(minutes=30))])
+
+    report = await run(tmp_path)  # type: ignore[assignment]
+
+    assert report.returned == 2
+    assert [item.source for item in report.items] == ["local", "sync"]
+
+
+async def test_merged_rows_stay_newest_first(tmp_path: Path) -> None:
+    await build_db(
+        tmp_path,
+        [
+            history_record("a", url="https://a.test/", visits=[(DAY, 1)]),
+            history_record("b", url="https://b.test/", visits=[(DAY + timedelta(hours=2), 1)]),
+        ],
+    )
+    await add_local(
+        tmp_path,
+        [
+            local_visit("https://a.test/", when=DAY),
+            local_visit("https://c.test/", when=DAY + timedelta(hours=1)),
+        ],
+    )
+
+    report = await run(tmp_path)  # type: ignore[assignment]
+
+    assert [item.url for item in report.items] == [
+        "https://b.test/",
+        "https://c.test/",
+        "https://a.test/",
+    ]
+    assert [item.source for item in report.items] == ["sync", "local", "both"]
+
+
+async def test_sources_field_says_what_contributed(tmp_path: Path) -> None:
+    await build_db(tmp_path, [history_record("rec")])
+    await add_local(tmp_path, [local_visit()])
+
+    report = await run(tmp_path)  # type: ignore[assignment]
+
+    assert report.sources == ["sync", "local"]
+    assert report.local_records == 1
+    assert report.records == 1
+
+
+async def test_local_visits_go_through_the_same_filters(tmp_path: Path) -> None:
+    """过滤器对两个源一视同仁 —— 不然"合并"就成了半成品。"""
+    await build_db(tmp_path, [])
+    await add_local(
+        tmp_path,
+        [
+            local_visit("https://wanted.test/page", when=DAY, title="Wanted"),
+            local_visit("https://other.test/", when=DAY),
+            local_visit("https://wanted.test/old", when=DAY - timedelta(days=30)),
+        ],
+    )
+
+    report = await run(  # type: ignore[assignment]
+        tmp_path, domain="wanted.test", since=DAY - timedelta(days=1)
+    )
+
+    assert [item.url for item in report.items] == ["https://wanted.test/page"]
+
+
+async def test_local_visit_borrows_the_sync_title_when_it_has_none(tmp_path: Path) -> None:
+    """本地那条没标题、云端那条有 —— 合并后别把标题丢了。"""
+    await build_db(
+        tmp_path,
+        [history_record("rec", url="https://both.test/", title="云端标题", visits=[(DAY, 1)])],
+    )
+    await add_local(tmp_path, [local_visit("https://both.test/", when=DAY, title="")])
+
+    report = await run(tmp_path)  # type: ignore[assignment]
+
+    assert report.items[0].title == "云端标题"
+
+
+async def test_format_version_bumped_for_the_new_shape(tmp_path: Path) -> None:
+    """输出多了 source / source_machine、record_id 也可能为 null —— 形状变了就得报。"""
+    await build_db(tmp_path, [history_record("rec")])
+
+    report = await run(tmp_path)  # type: ignore[assignment]
+
+    assert report.format_version == 2
+
+
+async def test_json_shape_of_a_merged_row(tmp_path: Path) -> None:
+    await build_db(tmp_path, [history_record("rec", url="https://both.test/", visits=[(DAY, 1)])])
+    await add_local(tmp_path, [local_visit("https://both.test/", when=DAY)])
+
+    report = await run(tmp_path)  # type: ignore[assignment]
+    payload = json.loads(report.to_json())
+
+    assert payload["sources"] == ["sync", "local"]
+    assert payload["local_records"] == 1
+    assert payload["items"][0] == {
+        "url": "https://both.test/",
+        "title": "Example",
+        "visited_at": "2026-09-13T12:00:00+00:00",
+        "visit_type": 1,
+        "visit_type_name": "link",
+        "record_id": "rec",
+        "source": "both",
+        "source_machine": "test-laptop",
+    }
