@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import os
 import stat
 from pathlib import Path
 
@@ -14,6 +15,10 @@ import pytest
 
 from ffsync.credentials import AgeIdentity, CredentialStore
 from ffsync.errors import ConfigurationError, DecryptionError
+
+_POSIX_ONLY = pytest.mark.skipif(
+    os.name != "posix", reason="POSIX 权限位在 Windows 上不存在（那边走 ACL）"
+)
 
 CREDENTIALS = '{"access_token": "secret-token-abc", "refresh_token": "secret-refresh-xyz"}'
 
@@ -79,6 +84,7 @@ def test_save_overwrites_previous_credentials(tmp_path: Path) -> None:
 # ── 私钥文件的权限 ────────────────────────────────────────────────────────
 
 
+@_POSIX_ONLY
 def test_identity_is_written_0600(tmp_path: Path) -> None:
     path = tmp_path / "age-key.txt"
 
@@ -87,6 +93,7 @@ def test_identity_is_written_0600(tmp_path: Path) -> None:
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
+@_POSIX_ONLY
 @pytest.mark.parametrize("mode", [0o644, 0o640, 0o660, 0o777, 0o400])
 def test_wide_or_odd_permissions_are_refused(tmp_path: Path, mode: int) -> None:
     path = _identity_file(tmp_path)

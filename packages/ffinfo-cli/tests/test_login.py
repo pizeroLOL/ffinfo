@@ -11,7 +11,9 @@ import base64
 import hashlib
 import json
 import os
+import stat
 import struct
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -34,6 +36,7 @@ _AUTH_CODE = "auth-code-from-the-address-bar"
 # ── 默认路径（只有 CLI 层才有默认值） ────────────────────────────────────
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="XDG 是 POSIX 的约定")
 def test_paths_follow_xdg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
@@ -43,6 +46,16 @@ def test_paths_follow_xdg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
     assert data_dir() == tmp_path / "data" / "ffinfo"
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="只有 Windows 才有 %APPDATA%")
+def test_paths_use_appdata_on_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+
+    assert identity_path() == tmp_path / "roaming" / "ffinfo" / "age-key.txt"
+    assert credentials_path() == tmp_path / "local" / "ffinfo" / "credentials.age"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="XDG 是 POSIX 的约定")
 def test_paths_fall_back_to_home(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.delenv("XDG_DATA_HOME", raising=False)
@@ -119,10 +132,9 @@ async def test_login_derives_the_sync_key_bundle(tmp_path: Path) -> None:
     assert len(bundle.hmac_key) == 32
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX 权限位在 Windows 上不存在")
 async def test_login_writes_an_identity_with_tight_permissions(tmp_path: Path) -> None:
     await _login(tmp_path, _FakeReceiver())
-
-    import stat
 
     assert stat.S_IMODE((tmp_path / "age-key.txt").stat().st_mode) == 0o600
 

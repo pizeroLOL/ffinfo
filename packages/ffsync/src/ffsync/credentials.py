@@ -19,6 +19,7 @@ from ffsync.errors import ConfigurationError, DecryptionError
 
 __all__ = ["AgeIdentity", "CredentialStore"]
 
+_IS_WINDOWS: Final = os.name == "nt"
 _IDENTITY_MODE: Final = 0o600
 
 
@@ -26,6 +27,9 @@ class AgeIdentity:
     """age 私钥，外加"文件权限"这条安全纪律。
 
     落盘一律 0600；读盘时**只接受 0600** —— 权限宽了就拒绝启动，不做"默默不安全"的事。
+
+    Windows 没有 POSIX 权限位（文件保护走 ACL），那边跳过这项检查：
+    报一个用户永远修不好的错没有意义。macOS / Linux 照常。
     """
 
     __slots__ = ("_identity",)
@@ -64,7 +68,7 @@ class AgeIdentity:
     # ── 落盘 ──────────────────────────────────────────────────────────────
 
     def to_file(self, path: Path) -> None:
-        """写到调用者指定的路径，权限 0600。"""
+        """写到调用者指定的路径。POSIX 上权限 0600；Windows 上走 ACL。"""
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, _IDENTITY_MODE)
@@ -73,8 +77,10 @@ class AgeIdentity:
             raise ConfigurationError(msg) from exc
         try:
             os.write(fd, str(self._identity).encode("utf-8"))
-            # os.open 的 mode 会被 umask 削，显式再设一次
-            os.fchmod(fd, _IDENTITY_MODE)
+            if hasattr(os, "fchmod"):
+                # os.open 的 mode 会被 umask 削，显式再设一次。
+                # Windows 没有 fchmod，那边不做这一步。
+                os.fchmod(fd, _IDENTITY_MODE)
         except OSError as exc:
             msg = f"写不了私钥文件 {path}：{exc.strerror}"
             raise ConfigurationError(msg) from exc
@@ -147,9 +153,12 @@ class CredentialStore:
 
 
 def _require_private_permissions(path: Path) -> None:
-    """只接受 0600；别的值一律带着"怎么修"一起报错。"""
+    """只接受 0600；别的值一律带着"怎么修"一起报错。
+
+    Windows 上直接放行 —— 见 :class:`AgeIdentity` 的说明。
+    """
     try:
-        mode = stat.S_IMODE(path.stat().st_mode)
+        stat_result = path.stat()
     except FileNotFoundError as exc:
         msg = f"私钥文件不存在：{path}"
         raise ConfigurationError(msg) from exc
@@ -157,6 +166,10 @@ def _require_private_permissions(path: Path) -> None:
         msg = f"读不了私钥文件 {path}：{exc.strerror}"
         raise ConfigurationError(msg) from exc
 
+    if _IS_WINDOWS:
+        return
+
+    mode = stat.S_IMODE(stat_result.st_mode)
     if mode != _IDENTITY_MODE:
         msg = (
             f"私钥文件 {path} 的权限是 {mode:04o}，必须是 600 —— "

@@ -1,0 +1,10 @@
+# 统一换行符：Windows 上 checkout 成 CRLF 会让 ruff / pytest 出问题
+* text=auto eol=lf
+
+# 二进制，别碰
+*.png binary
+*.jpg binary
+*.gz binary
+*.zip binary
+*.sqlite binary
+*.age binary

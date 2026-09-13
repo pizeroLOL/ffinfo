@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Final
 
@@ -14,14 +15,26 @@ _APP: Final = "ffinfo"
 
 
 def config_dir() -> Path:
-    """配置目录 —— 私钥放这里。"""
-    base = os.environ.get("XDG_CONFIG_HOME") or "~/.config"
+    """配置目录 —— 私钥放这里。
+
+    Windows 走 ``%APPDATA%``，其他平台走 XDG。
+    """
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or "~/AppData/Roaming"
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or "~/.config"
     return Path(base).expanduser() / _APP
 
 
 def data_dir() -> Path:
-    """数据目录 —— 加密凭据（以及将来的 SQLite）放这里。"""
-    base = os.environ.get("XDG_DATA_HOME") or "~/.local/share"
+    """数据目录 —— 加密凭据（以及将来的 SQLite）放这里。
+
+    Windows 走 ``%LOCALAPPDATA%``，其他平台走 XDG。
+    """
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or "~/AppData/Local"
+    else:
+        base = os.environ.get("XDG_DATA_HOME") or "~/.local/share"
     return Path(base).expanduser() / _APP
 
 
