@@ -1,0 +1,96 @@
+[project]
+name = "ffinfo-workspace"
+version = "0.0.0"
+description = "uv workspace root for ffsync + ffinfo-cli"
+requires-python = ">=3.14"
+# 根是虚拟项目：不打包，但把两个成员拉成依赖，这样裸 `uv sync` 就能装全
+dependencies = [
+    "ffsync",
+    "ffinfo-cli",
+]
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+ffsync = { workspace = true }
+ffinfo-cli = { workspace = true }
+
+# ── 国内镜像（显著加速；开源发布前请改为可选/环境变量）──────
+[[tool.uv.index]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true
+
+[tool.uv]
+package = false
+# cache 与 .venv 不同文件系统，硬链接会失败；显式用 copy 消掉警告
+link-mode = "copy"
+# python-build-standalone 镜像。
+# ⚠️ 实测：USTC 的 github-release 镜像对大文件是回源代理，仅 ~35 KB/s，
+#    比直连还慢。仅在没有本地 Python 时才走这里，日常无需重装。
+python-install-mirror = "https://mirrors.ustc.edu.cn/github-release/astral-sh/python-build-standalone"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "pyright>=1.1.390",
+    "pre-commit>=4.0",
+]
+
+# ── ruff（配置集中在这里，不散落成独立文件）────────────────
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = ["packages/*/src", "packages/*/tests"]
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff 专属
+    "ANN",  # 强制类型标注
+    "D",    # pydocstyle
+]
+ignore = [
+    "D203",     # 与 D211 冲突
+    "D213",     # 与 D212 冲突
+    "D400",     # 中文句号「。」结尾是正常的
+    "D403",     # 产品名（ffinfo / ffsync）小写开头是正常的
+    "D415",
+    "RUF001",   # 全角标点在中文注释里是正常的
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"packages/*/tests/**" = ["D", "ANN"]
+
+[tool.ruff.format]
+quote-style = "double"
+docstring-code-format = true
+
+# ── pyright ────────────────────────────────────────────────
+[tool.pyright]
+include = ["packages/*/src", "packages/*/tests"]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+reportMissingTypeStubs = false
+
+# ── pytest ─────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["packages/*/tests"]
+pythonpath = ["packages/ffsync/src", "packages/ffinfo-cli/src"]
+asyncio_mode = "auto"
+# 两个包各有同名 test 文件，用 importlib 模式避免 basename 冲突
+addopts = "-ra --strict-markers --import-mode=importlib"

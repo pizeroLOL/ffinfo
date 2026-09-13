@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# uv
+.uv/
+
+# 测试与覆盖率
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 类型检查
+.pyright/
+
+# 构建
+build/
+dist/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 本地数据（绝不入库）
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.age
+age-key.txt
