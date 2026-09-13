@@ -69,8 +69,13 @@ def sync(
         help="要拉取的 collection：history / bookmarks / tabs（白名单，其它一律拒绝）",
     ),
     page_size: int = typer.Option(100, "--page-size", help="每页拉多少条（服务器上限 100）"),
+    full: bool = typer.Option(
+        False,
+        "--full",
+        help="强制全量重拉（对账用：服务器会清掉很老的墓碑，只有全量才发现那部分删除）",
+    ),
 ) -> None:
-    """从 Firefox Sync 拉取数据并落盘。输出 JSON，拉全了才写库。"""
+    """从 Firefox Sync 拉取数据并落盘。默认只拉上次同步之后的变更。"""
     try:
         report = sync_blocking(
             identity_path=identity_path(),
@@ -78,6 +83,7 @@ def sync(
             database_path=database_path(),
             collection=collection,
             page_size=page_size,
+            full=full,
         )
     except BackoffError as exc:
         scheme = "X-Weave-Backoff" if exc.soft else "Retry-After"

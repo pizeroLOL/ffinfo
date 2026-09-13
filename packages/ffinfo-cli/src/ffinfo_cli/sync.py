@@ -1,7 +1,11 @@
 """``ffinfo-cli sync`` —— 从 Firefox Sync 拉数据并落盘。
 
-**拉全了才写库。** 中途被要求退避、集合被改、条数对不上 —— 库里一个字节都不会动。
-半截数据比没有数据更坏：agent 分不出"这个账号就这么多"还是"上次没拉完"。
+**拉全了才写库。** 中途被要求退避、集合被改、条数对不上 —— 库里一个字节都不会动，
+**游标也不推进**。半截数据比没有数据更坏：agent 分不出"这个账号就这么多"还是"上次没拉完"。
+
+第一次是全量；之后每次只拉**上次同步之后的变更**（``newer=<游标>``）。
+``--full`` 可以强制回到全量 —— 增量拉久了偶尔需要一次全量来"对账"
+（服务器会把很老的墓碑清掉，只有全量才能发现那部分删除）。
 """
 
 from __future__ import annotations
@@ -11,7 +15,7 @@ import json
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Final
+from typing import ClassVar, Final
 
 import httpx
 from pydantic import BaseModel, ConfigDict
@@ -20,8 +24,15 @@ from ffinfo.credentials import AgeIdentity, CredentialStore
 from ffinfo.errors import ConfigurationError
 from ffinfo.keys import OLD_SYNC_SCOPE
 from ffinfo.oauth import Credentials
-from ffinfo.storage import MOZILLA_TOKEN_SERVER, EncryptedBso, SyncStorageClient
-from ffinfo_cli.store import open_database, replace_collections
+from ffinfo.storage import MOZILLA_TOKEN_SERVER, CollectionFetch, SyncStorageClient
+from ffinfo_cli.store import (
+    CollectionBatch,
+    SyncRecord,
+    load_cursor,
+    open_database,
+    save_cursor,
+    store_batches,
+)
 
 _HTTP_TIMEOUT_SECONDS: Final = 60.0
 
@@ -48,14 +59,24 @@ _PROTOCOL_COLLECTIONS: Final = ("crypto",)
 class SyncReport(BaseModel):
     """一次 sync 的结果 —— 直接就是 ``--json`` 的输出。"""
 
-    model_config = ConfigDict(frozen=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
 
     format_version: int = 1
     collection: str
+    mode: str
+    """``full``（全量）或 ``incremental``（只拉变更）。"""
     records: int
+    """库里现在总共有多少条。"""
+    inserted: int
+    updated: int
+    deleted: int
     pages: int
     tombstones: int
+    """这次服务器报了几条删除。"""
     server_count: int | None
+    """服务器报告的条数。**增量时为 ``None``** —— 变更集的条数跟全量对不上，比了没意义。"""
+    cursor_before: float | None
+    cursor_after: float
     database: str
     elapsed_seconds: float
     protocol: dict[str, int] = {}
@@ -80,9 +101,10 @@ async def run_sync(
     collection: str,
     http: httpx.AsyncClient,
     page_size: int = 100,
+    full: bool = False,
     clock: Callable[[], float] = time.time,
 ) -> SyncReport:
-    """拉一个 collection（外加协议数据），全部校验通过后一起落盘。
+    """拉一个 collection（外加协议数据），全部校验通过后一起落盘、再推进游标。
 
     HTTP 客户端与时钟由调用者注入 —— 测试才能塞 mock、不真的 ``sleep``。
     """
@@ -114,28 +136,57 @@ async def run_sync(
     )
 
     started = clock()
-    fetch = await client.fetch_collection(collection, page_size=page_size)
-    batches: dict[str, list[EncryptedBso]] = {collection: list(fetch.records)}
-
-    protocol: dict[str, int] = {}
-    for name in _PROTOCOL_COLLECTIONS:
-        auxiliary = await client.fetch_collection(name, page_size=page_size)
-        batches[name] = list(auxiliary.records)
-        protocol[name] = auxiliary.count
-
     engine = await open_database(database_path)
-    stored = await replace_collections(engine, batches)
+    targets = (collection, *_PROTOCOL_COLLECTIONS)
 
+    # ── 先全部拉下来，一条都别写 ──────────────────────────────────────────
+    cursors: dict[str, float | None] = {}
+    fetches: dict[str, CollectionFetch] = {}
+    batches: list[CollectionBatch] = []
+    for name in targets:
+        cursor = None if full else await load_cursor(engine, name)
+        cursors[name] = cursor
+        fetch = await client.fetch_collection(name, page_size=page_size, newer=cursor)
+        fetches[name] = fetch
+        batches.append(CollectionBatch(collection=name, records=fetch.records, full=cursor is None))
+
+    # ── 全成或全不写 ──────────────────────────────────────────────────────
+    results = await store_batches(engine, batches)
+
+    # ── 数据安全落地了，才推进游标 ────────────────────────────────────────
+    now = clock()
+    for name in targets:
+        await save_cursor(
+            engine,
+            name,
+            last_modified=fetches[name].last_modified,
+            synced_at=now,
+            records=await _count(name),
+        )
+
+    main = fetches[collection]
+    applied = results[collection]
     return SyncReport(
         collection=collection,
-        records=stored[collection],
-        pages=fetch.pages,
-        tombstones=sum(1 for record in fetch.records if record.is_tombstone),
-        server_count=fetch.server_count,
+        mode="full" if cursors[collection] is None else "incremental",
+        records=await _count(collection),
+        inserted=applied.inserted,
+        updated=applied.updated,
+        deleted=applied.deleted,
+        pages=main.pages,
+        tombstones=sum(1 for record in main.records if record.is_tombstone),
+        server_count=main.server_count,
+        cursor_before=cursors[collection],
+        cursor_after=main.last_modified,
         database=str(database_path),
         elapsed_seconds=round(clock() - started, 2),
-        protocol=protocol,
+        protocol={name: fetches[name].count for name in _PROTOCOL_COLLECTIONS},
     )
+
+
+async def _count(collection: str) -> int:
+    """库里这个 collection 现在有多少条。"""
+    return await SyncRecord.count().where(SyncRecord.collection == collection)
 
 
 def sync_blocking(
@@ -145,6 +196,7 @@ def sync_blocking(
     database_path: Path,
     collection: str,
     page_size: int = 100,
+    full: bool = False,
 ) -> SyncReport:
     """:func:`run_sync` 的同步外壳：自己开 HTTP 客户端。"""
 
@@ -157,6 +209,7 @@ def sync_blocking(
                 collection=collection,
                 http=http,
                 page_size=page_size,
+                full=full,
             )
 
     return asyncio.run(_main())

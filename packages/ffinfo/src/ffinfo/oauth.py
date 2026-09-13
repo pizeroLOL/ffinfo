@@ -15,7 +15,7 @@ import json
 import secrets
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Final, Protocol, Self
+from typing import ClassVar, Final, Protocol, Self
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
@@ -139,7 +139,7 @@ class AuthorizationRequest:
 class OAuthTokens(BaseModel):
     """token 端点的响应。"""
 
-    model_config = ConfigDict(extra="ignore", frozen=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore", frozen=True)
 
     access_token: str
     token_type: str = "bearer"
@@ -170,7 +170,7 @@ class CodeReceiver(Protocol):
 class OAuthClient:
     """Mozilla 账号的 OAuth 客户端。**没有密码可传，也没有密码可存。**"""
 
-    __slots__ = ("_client_id", "_endpoints", "_http", "_redirect_uri")
+    __slots__: tuple[str, ...] = ("_client_id", "_endpoints", "_http", "_redirect_uri")
 
     def __init__(
         self,
@@ -306,7 +306,7 @@ class Credentials(BaseModel):
     :class:`~ffinfo.credentials.CredentialStore`（age 加密 + 权限纪律）。
     """
 
-    model_config = ConfigDict(extra="ignore", frozen=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore", frozen=True)
 
     access_token: str
     refresh_token: str | None = None

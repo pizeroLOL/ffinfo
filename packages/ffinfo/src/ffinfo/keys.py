@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Final, Self
+from typing import ClassVar, Final, Self
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -36,7 +36,7 @@ FxA 只给"携带密钥的 scope"（即这个完整的）派发密钥。
 class ScopedKey(BaseModel):
     """``keys_jwe`` 解开后的一个 scope 密钥（Mozilla 的 ScopedKey 结构）。"""
 
-    model_config = ConfigDict(frozen=True, extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True, extra="ignore")
 
     kty: str
     scope: str
@@ -89,7 +89,7 @@ class CollectionKeys:
 class _CryptoKeysRecord(BaseModel):
     """``crypto/keys`` 的明文结构（``sync15/src/record_types.rs`` 的 ``CryptoKeysRecord``）。"""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     id: str
     collection: str

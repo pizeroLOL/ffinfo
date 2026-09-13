@@ -18,7 +18,7 @@ import time
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final, Self
+from typing import ClassVar, Final, Self
 from urllib.parse import urlsplit
 
 from piccolo.engine.sqlite import SQLiteEngine
@@ -41,7 +41,7 @@ _MAX_SKIPPED_DETAILS: Final = 10
 class ListEntry(BaseModel):
     """输出里的一条浏览记录。"""
 
-    model_config = ConfigDict(frozen=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
 
     url: str
     title: str
@@ -67,7 +67,7 @@ class ListEntry(BaseModel):
 class ListReport(BaseModel):
     """``list --json`` 的输出。"""
 
-    model_config = ConfigDict(frozen=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
 
     format_version: int = 1
     generated_at: str

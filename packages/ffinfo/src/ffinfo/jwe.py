@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import struct
-from typing import Final, Self
+from typing import ClassVar, Final, Self
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -32,7 +32,7 @@ _JWE_SEGMENTS: Final = 5
 class EphemeralKeyPair:
     """临时 P-256 密钥对：公钥交给 Mozilla 加密，私钥留着解 ``keys_jwe``。"""
 
-    __slots__ = ("_private_key",)
+    __slots__: tuple[str, ...] = ("_private_key",)
 
     def __init__(self, private_key: ec.EllipticCurvePrivateKey) -> None:
         """包装一个 P-256 私钥；一般走 :meth:`generate` 或 :meth:`from_private_bytes`。"""
@@ -122,7 +122,7 @@ class EphemeralKeyPair:
 class _Epk(BaseModel):
     """JWE header 里的临时公钥。"""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     kty: str
     crv: str
@@ -133,7 +133,7 @@ class _Epk(BaseModel):
 class _JweHeader(BaseModel):
     """我们认识的 JWE header 子集。"""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     alg: str
     enc: str

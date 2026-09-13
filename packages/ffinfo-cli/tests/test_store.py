@@ -36,17 +36,32 @@ async def test_open_database_creates_file_and_table(tmp_path: Path) -> None:
 
 
 async def test_replace_collection_round_trip(tmp_path: Path) -> None:
-    """存进去，读得回来 —— 包括墓碑那条。"""
+    """存进去，读得回来。"""
     engine = await open_database(tmp_path / "db.sqlite")
 
-    stored = await replace_collection(engine, "history", [record("a"), record("b", payload=None)])
+    stored = await replace_collection(engine, "history", [record("a"), record("b")])
 
     assert stored == 2
     rows = await SyncRecord.select().order_by(SyncRecord.record_id)
     assert [row["record_id"] for row in rows] == ["a", "b"]
     assert rows[0]["payload"] == "encrypted"
-    assert rows[1]["payload"] is None  # 墓碑：payload 是 NULL，不是"没拉到"
     assert rows[0]["collection"] == "history"
+
+
+async def test_tombstones_are_not_stored(tmp_path: Path) -> None:
+    """墓碑表示"这条在别的设备上被删了" —— 它的归宿是**那一行不存在**。
+
+    这样"库里有行"就等于"这条记录在服务器上存在"，消费方不用再判空。
+    """
+    engine = await open_database(tmp_path / "db.sqlite")
+
+    stored = await replace_collection(
+        engine, "history", [record("a"), record("gone", payload=None)]
+    )
+
+    assert stored == 1
+    rows = await SyncRecord.select()
+    assert [row["record_id"] for row in rows] == ["a"]
 
 
 async def test_payload_is_stored_verbatim(tmp_path: Path) -> None:

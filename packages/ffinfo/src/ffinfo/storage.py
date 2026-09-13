@@ -24,7 +24,7 @@ import secrets
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -140,7 +140,7 @@ def _endpoint_url(api_endpoint: str, path: str) -> httpx.URL:
 class TokenserverToken(BaseModel):
     """tokenserver 的响应。"""
 
-    model_config = ConfigDict(frozen=True, extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True, extra="ignore")
 
     id: str
     key: str
@@ -166,7 +166,7 @@ class EncryptedBso(BaseModel):
     它是 ``null`` 时表示墓碑（这条记录在别的设备上被删了）。
     """
 
-    model_config = ConfigDict(frozen=True, extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True, extra="ignore")
 
     id: str
     modified: float
@@ -237,7 +237,7 @@ class SyncStorageClient:
     不必真的 ``sleep``。
     """
 
-    __slots__ = (
+    __slots__: tuple[str, ...] = (
         "_access_token",
         "_backoff",
         "_clock",
@@ -340,25 +340,35 @@ class SyncStorageClient:
         sort: str | None = None,
         retries: int = 3,
         verify_count: bool = True,
+        newer: float | None = None,
     ) -> CollectionFetch:
-        """把一个 collection 的**全部**记录拉下来，自动翻页。
+        """拉一个 collection 的记录，自动翻页。
+
+        ``newer`` 给了就只拉**严格晚于**这个时间戳的记录（增量同步）；
+        不给就是全量。时间戳的来源是上一次的 :attr:`CollectionFetch.last_modified`。
 
         ``retries`` 是"读到一半集合被改了"（412）时整段重试的次数 —— 连同首次一共
         ``retries + 1`` 次尝试，还是读不到一致快照就报错（默认 3 次重试）。
 
-        ``verify_count=True`` 时会先问服务器要该 collection 的条数，拉完对不上就报错 ——
-        这是"没漏页"的机器可验证证据，不是自我感觉良好。
+        ``verify_count=True`` 时拉完会和服务器报告的条数对一下 —— 但**只在全量时**才有意义：
+        增量拉回来的只是变更集，条数本来就对不上整个 collection。
+        所以 ``newer`` 给了的时候这个开关会被自动关掉。
 
         返回的记录**未经解密**。
         """
+        incremental = newer is not None
         server_count: int | None = None
-        if verify_count:
+        if verify_count and not incremental:
             server_count = (await self.collection_counts()).get(collection, 0)
 
         for attempt in range(retries + 1):
             try:
                 result = await self._fetch_pages(
-                    collection, page_size=page_size, sort=sort, server_count=server_count
+                    collection,
+                    page_size=page_size,
+                    sort=sort,
+                    server_count=server_count,
+                    newer=newer,
                 )
             except _CollectionChanged as exc:
                 if attempt < retries:
@@ -388,6 +398,7 @@ class SyncStorageClient:
         page_size: int,
         sort: str | None,
         server_count: int | None,
+        newer: float | None = None,
     ) -> CollectionFetch:
         """真正翻页的那个循环。集合中途被改会抛 :class:`_CollectionChanged` 让上层重试。"""
         token = await self.token()
@@ -398,7 +409,12 @@ class SyncStorageClient:
 
         while True:
             url = _collection_url(
-                token.api_endpoint, collection, limit=page_size, offset=offset, sort=sort
+                token.api_endpoint,
+                collection,
+                limit=page_size,
+                offset=offset,
+                sort=sort,
+                newer=newer,
             )
             response = await self._authorized_get(url, if_unmodified_since=last_modified)
 
@@ -517,7 +533,13 @@ class SyncStorageClient:
 
 
 def _collection_url(
-    api_endpoint: str, collection: str, *, limit: int, offset: str | None, sort: str | None
+    api_endpoint: str,
+    collection: str,
+    *,
+    limit: int,
+    offset: str | None,
+    sort: str | None,
+    newer: float | None = None,
 ) -> httpx.URL:
     """拼一页的 URL。``offset`` 是服务器给的不透明串，原样传回去。"""
     params = {"full": "1", "limit": str(limit)}
@@ -525,7 +547,18 @@ def _collection_url(
         params["sort"] = sort
     if offset is not None:
         params["offset"] = offset
+    if newer is not None:
+        params["newer"] = format_timestamp(newer)
     return _endpoint_url(api_endpoint, f"storage/{collection}").copy_with(params=params)
+
+
+def format_timestamp(value: float) -> str:
+    """把时间戳格式化成服务器要的样子（两位小数）。
+
+    **向下取整，不四舍五入。** ``newer`` 的语义是"严格大于"，向上取整会**跳过**
+    落在中间那零点几秒里的记录 —— 宁可多拉一条（反正 upsert 幂等），也不能漏。
+    """
+    return f"{math.floor(value * 100) / 100:.2f}"
 
 
 def _required_last_modified(response: httpx.Response) -> float:

@@ -23,6 +23,7 @@ from ffinfo.storage import (
     SyncStorageClient,
     _normalized_request,
     _parse_seconds,
+    format_timestamp,
     hawk_authorization,
 )
 
@@ -100,6 +101,11 @@ def bso(record_id: str) -> dict[str, Any]:
         "modified": 1789320500.5,
         "payload": json.dumps({"ciphertext": "AAAA", "IV": "BBBB", "hmac": "CCCC"}),
     }
+
+
+def storage_requests(fake: FakeSync, collection: str) -> list[httpx.Request]:
+    """只看某个 collection 的存储请求。"""
+    return [r for r in fake.requests if f"/storage/{collection}" in r.url.path]
 
 
 # ── Hawk 签名 ─────────────────────────────────────────────────────────────
@@ -355,6 +361,50 @@ async def test_second_page_carries_if_unmodified_since() -> None:
     first, second = [r for r in fake.requests if "/storage/" in r.url.path]
     assert "X-If-Unmodified-Since" not in first.headers
     assert second.headers["X-If-Unmodified-Since"] == "1789320600.12"
+
+
+async def test_incremental_request_carries_newer() -> None:
+    """给了 ``newer`` 就只拉变更 —— 时间戳要按服务器要的格式（两位小数）带上。"""
+    fake = FakeSync()
+    fake.pages = [page([bso("a")])]
+
+    result = await fake.client().fetch_collection("history", newer=1789320619.514)
+
+    request = storage_requests(fake, "history")[0]
+    assert request.url.params["newer"] == "1789320619.51"  # 向下取整
+    assert result.count == 1
+
+
+async def test_incremental_skips_the_count_check() -> None:
+    """增量拉回来的只是变更集，条数跟整个 collection 对不上 —— 比了没意义。"""
+    fake = FakeSync()
+    fake.pages = [page([bso("a")])]
+
+    result = await fake.client().fetch_collection("history", newer=1.0)
+
+    assert result.server_count is None
+    assert not [r for r in fake.requests if "/info/" in r.url.path]
+
+
+def test_timestamp_is_floored_never_rounded_up() -> None:
+    """``newer`` 是"严格大于" —— 向上取整会**跳过**落在中间那零点几秒里的记录。"""
+    assert format_timestamp(1789320619.51) == "1789320619.51"
+    assert format_timestamp(1789320619.514) == "1789320619.51"
+    assert format_timestamp(1789320619.516) == "1789320619.51"  # 不是 .52
+    assert format_timestamp(1789320619.999) == "1789320619.99"
+
+
+async def test_incremental_pages_keep_newer_on_every_page() -> None:
+    """翻页时 ``newer`` 不能丢 —— 丢了第二页就变成全量了。"""
+    fake = FakeSync()
+    fake.pages = [page([bso("a")], next_offset="O1"), page([bso("b")])]
+
+    await fake.client().fetch_collection("history", newer=1789320619.51)
+
+    first, second = storage_requests(fake, "history")
+    assert first.url.params["newer"] == "1789320619.51"
+    assert second.url.params["newer"] == "1789320619.51"
+    assert second.url.params["offset"] == "O1"
 
 
 async def test_records_are_left_encrypted() -> None:

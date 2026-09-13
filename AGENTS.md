@@ -35,6 +35,27 @@ uv run prek install                       # 装 git 钩子
 > 读同一份 `.pre-commit-config.yaml`。ruff / ruff-format / pyright 都走 **local 钩子**：
 > 跑的就是 `uv run` 那一份，不会像钉死 rev 的钩子那样跟 `pyproject.toml` 漂开。
 
+## 代码约定
+
+- **类级变量一律带类型标注** —— 写 `field: Type = ...`，不留裸赋值。
+  框架元数据也算：
+
+  ```python
+  class Record(BaseModel):
+      model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+      id: str
+
+  class Client:
+      __slots__: tuple[str, ...] = ("_http",)
+
+  class Row(Table):
+      collection: Varchar = Varchar(length=64, index=True)
+  ```
+
+  ⚠️ **没有 lint 规则能强制这一条**（ruff 的 ANN 系列只管函数签名），靠 review 兜住。
+  检查方式：用 AST 扫 `ast.Assign` 落在 `ClassDef` 顶层的裸 `Name` 赋值
+  —— 注意必须用 **Python 3.14** 跑（代码里有 PEP 758 的 `except A, B:` 新语法，3.12 解析不了）。
+
 ## 硬性约束
 
 - **库不持有任何默认路径。** `ffinfo` 的所有 I/O 位置由调用者注入，构造函数不设默认参数；

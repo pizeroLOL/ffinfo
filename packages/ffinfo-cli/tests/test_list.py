@@ -20,7 +20,7 @@ from ffinfo.keys import OLD_SYNC_SCOPE, ScopedKey
 from ffinfo.oauth import Credentials
 from ffinfo.storage import EncryptedBso
 from ffinfo_cli.list import apply_filters, matches_domain, parse_since, run_list
-from ffinfo_cli.store import open_database, replace_collections
+from ffinfo_cli.store import CollectionBatch, open_database, store_batches
 
 KSYNC = bytes(range(64))
 """凭据里那把 kSync —— 与 ``test_sync.py`` 用的是同一把。"""
@@ -110,8 +110,16 @@ async def build_db(
 ) -> None:
     """把库造出来：一条 crypto/keys + 若干 history 记录。"""
     engine = await open_database(tmp_path / "db.sqlite")
-    await replace_collections(
-        engine, {"crypto": [keys if keys is not None else keys_record()], "history": records}
+    await store_batches(
+        engine,
+        [
+            CollectionBatch(
+                collection="crypto",
+                records=[keys if keys is not None else keys_record()],
+                full=True,
+            ),
+            CollectionBatch(collection="history", records=records, full=True),
+        ],
     )
 
 
@@ -241,7 +249,10 @@ async def test_everything_unreadable_means_the_wrong_account(tmp_path: Path) -> 
 async def test_missing_keys_record_says_what_to_do(tmp_path: Path) -> None:
     """库里没有 crypto/keys —— 得说清楚"先跑 sync"，而不是抛个 KeyError。"""
     engine = await open_database(tmp_path / "db.sqlite")
-    await replace_collections(engine, {"history": [history_record("rec")]})
+    await store_batches(
+        engine,
+        [CollectionBatch(collection="history", records=[history_record("rec")], full=True)],
+    )
 
     with pytest.raises(ConfigurationError, match="ffinfo-cli sync"):
         await run(tmp_path)

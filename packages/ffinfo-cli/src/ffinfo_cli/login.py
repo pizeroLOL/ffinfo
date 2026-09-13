@@ -32,7 +32,7 @@ _HTTP_TIMEOUT_SECONDS: float = 30.0
 class ConsoleCodeReceiver:
     """把授权 URL 交给用户，等他把地址栏里那一条粘回来。"""
 
-    __slots__ = ("_open_browser",)
+    __slots__: tuple[str, ...] = ("_open_browser",)
 
     def __init__(self, *, open_browser: bool = True) -> None:
         """``open_browser=False`` 时只打印 URL，不尝试拉起浏览器。"""

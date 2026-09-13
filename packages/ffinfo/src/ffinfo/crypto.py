@@ -20,7 +20,7 @@ import hashlib
 import hmac as hmac_lib
 import os
 from dataclasses import dataclass
-from typing import Final, Self
+from typing import ClassVar, Final, Self
 
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -160,7 +160,9 @@ class KeyBundle:
 class EncryptedPayload(BaseModel):
     """服务器上一条记录的 ``payload`` 字段：``{"IV": …, "hmac": …, "ciphertext": …}``。"""
 
-    model_config = ConfigDict(frozen=True, populate_by_name=True, extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        frozen=True, populate_by_name=True, extra="ignore"
+    )
 
     iv: str = Field(alias="IV")
     hmac: str

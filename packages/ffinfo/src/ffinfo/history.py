@@ -24,7 +24,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Final
+from typing import ClassVar, Final
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -74,7 +74,7 @@ def visit_type_name(visit_type: int) -> str:
 class HistoryVisit(BaseModel):
     """一次访问。"""
 
-    model_config = ConfigDict(frozen=True, extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True, extra="ignore")
 
     date: int
     """访问时间，**微秒**（Unix epoch）。"""
@@ -96,7 +96,9 @@ class HistoryVisit(BaseModel):
 class HistoryRecord(BaseModel):
     """一条历史记录的**明文**（``histUri`` 那条记录解开之后的样子）。"""
 
-    model_config = ConfigDict(frozen=True, extra="ignore", populate_by_name=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        frozen=True, extra="ignore", populate_by_name=True
+    )
 
     id: str
     title: str = ""

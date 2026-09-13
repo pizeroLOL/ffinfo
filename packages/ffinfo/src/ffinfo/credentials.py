@@ -32,7 +32,7 @@ class AgeIdentity:
     报一个用户永远修不好的错没有意义。macOS / Linux 照常。
     """
 
-    __slots__ = ("_identity",)
+    __slots__: tuple[str, ...] = ("_identity",)
 
     def __init__(self, identity: pyrage.x25519.Identity) -> None:
         """包装一个 pyrage 私钥；一般走 :meth:`generate` 或 :meth:`from_file`。"""
@@ -113,7 +113,7 @@ class AgeIdentity:
 class CredentialStore:
     """把凭据（一段文本）用 age 加密存到调用者指定的路径。"""
 
-    __slots__ = ("_identity", "_path")
+    __slots__: tuple[str, ...] = ("_identity", "_path")
 
     def __init__(self, *, identity: AgeIdentity, path: Path) -> None:
         """两个位置都由调用者给 —— 库不认识任何默认路径。"""
