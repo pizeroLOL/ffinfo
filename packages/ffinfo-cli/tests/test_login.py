@@ -1,4 +1,6 @@
-"""CLI 层：默认路径 + ``ffinfo_cli login`` 的整条编排。
+"""CLI 层：``ffinfo_cli login`` 的整条编排。
+
+（默认路径的断言在 ``test_paths.py``。）
 
 HTTP 用 ``httpx.MockTransport`` 打桩。**keys_jwe 是测试里现场加密的** ——
 产品代码只做解密方向（本库严格只读），所以这里手写一份最小的 JWE 加密器，
@@ -13,7 +15,6 @@ import json
 import os
 import stat
 import struct
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -26,42 +27,10 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from ffinfo.credentials import AgeIdentity
 from ffinfo.errors import AuthError
 from ffinfo_cli.login import run_login
-from ffinfo_cli.paths import credentials_path, data_dir, identity_path
 from vectors import SCOPED_KEY
 
 _KEYS_JSON = SCOPED_KEY.payload_json
 _AUTH_CODE = "auth-code-from-the-address-bar"
-
-
-# ── 默认路径（只有 CLI 层才有默认值） ────────────────────────────────────
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="XDG 是 POSIX 的约定")
-def test_paths_follow_xdg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
-
-    assert identity_path() == tmp_path / "cfg" / "ffinfo-cli" / "age-key.txt"
-    assert credentials_path() == tmp_path / "data" / "ffinfo-cli" / "credentials.age"
-    assert data_dir() == tmp_path / "data" / "ffinfo-cli"
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="只有 Windows 才有 %APPDATA%")
-def test_paths_use_appdata_on_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
-
-    assert identity_path() == tmp_path / "roaming" / "ffinfo-cli" / "age-key.txt"
-    assert credentials_path() == tmp_path / "local" / "ffinfo-cli" / "credentials.age"
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="XDG 是 POSIX 的约定")
-def test_paths_fall_back_to_home(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
-
-    assert identity_path() == Path.home() / ".config" / "ffinfo-cli" / "age-key.txt"
-    assert credentials_path() == Path.home() / ".local" / "share" / "ffinfo-cli" / "credentials.age"
 
 
 # ── login 的整条编排 ─────────────────────────────────────────────────────

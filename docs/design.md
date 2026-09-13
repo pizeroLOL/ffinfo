@@ -59,7 +59,7 @@
 | # | 决策 | 备注 |
 |---|---|---|
 | 12 | 本地 **SQLite** · 双源**分表** · 查询时合并 · **保留来源标记** | 不强行合并，保留"这条是哪台机器看的" |
-| 13 | **age** 加密 · `age-keygen` 生成专用密钥 | 存 `~/.config/ffinfo/age-key.txt` |
+| 13 | **age** 加密 · `age-keygen` 生成专用密钥 | 存 `~/.config/ffinfo-cli/age-key.txt` |
 | 14 | **权限校验写进代码** | 不是 `0600` 就拒绝启动 —— 拒绝"默默不安全" |
 | 15 | 增量：**显式 `ffinfo-cli sync`** + 超期提示 | 查询保持纯本地、瞬时 |
 
@@ -84,6 +84,21 @@ client = SyncClient(credentials_path=..., keys_path=..., cache_dir=...)
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", "~/.config")).expanduser() / "ffinfo-cli"
 DATA_DIR   = Path(os.environ.get("XDG_DATA_HOME", "~/.local/share")).expanduser() / "ffinfo-cli"
 ```
+
+#### 默认位置落在哪（三平台）
+
+| 平台 | 配置（私钥） | 数据（凭据 / SQLite） |
+| --- | --- | --- |
+| Linux | `$XDG_CONFIG_HOME` 或 `~/.config` | `$XDG_DATA_HOME` 或 `~/.local/share` |
+| **macOS** | **同上 —— 走 XDG** | **同上 —— 走 XDG** |
+| Windows | `%APPDATA%` | `%LOCALAPPDATA%` |
+
+**macOS 为什么不走 `~/Library/Application Support`**：这里的凭据和私钥是给**命令行工具**
+用的，XDG 在 macOS 的开发者圈子里是通行做法（`~/.config` 到处都是）。改成原生路径的唯一
+收益是"更像 macOS 应用"，代价是同一份文档、同一套排错步骤跨平台不再通用。真要改，等有
+macOS 用户提出来再说 —— 在那之前，这是个**写下来的决定**，不是"漏了 macOS"。
+
+行为锁在 `packages/ffinfo-cli/tests/test_paths.py`，其中一条显式把平台改成 `darwin`。
 
 ---
 
