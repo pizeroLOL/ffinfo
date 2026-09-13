@@ -1,10 +1,28 @@
+# 用 prek 跑（pre-commit 的 Rust 替代）—— 读的是同一份配置，所以文件名没改。
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.4
+  # ── 本地钩子：跑的就是 `uv run` 那一份工具，不钉 rev ────────────────────
+  # 为什么不用 ruff-pre-commit 那个仓库：它的 rev 是钉死的，而 ruff 的
+  # target-version 跟着项目走 —— v0.8.4 不认识 py314，钩子直接 TOML 解析失败。
+  # local + system 没有这个漂移：`uv run ruff` 什么样，钩子就是什么样。
+  - repo: local
     hooks:
       - id: ruff
-        args: [--fix]
+        name: ruff
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
       - id: ruff-format
+        name: ruff-format
+        entry: uv run ruff format
+        language: system
+        types: [python]
+      - id: pyright
+        name: pyright
+        # 显式 --project：防止 pyright 向上找到祖先目录的 pyrightconfig.json 抢配置
+        entry: uv run pyright --project pyproject.toml
+        language: system
+        types: [python]
+        pass_filenames: false
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -15,13 +33,3 @@ repos:
       - id: check-toml
       - id: check-added-large-files
       - id: detect-private-key
-
-  - repo: local
-    hooks:
-      - id: pyright
-        name: pyright
-        # 显式 --project：防止 pyright 向上找到祖先目录的 pyrightconfig.json 抢配置
-        entry: uv run pyright --project pyproject.toml
-        language: system
-        types: [python]
-        pass_filenames: false

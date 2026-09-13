@@ -22,7 +22,7 @@ uv run ruff check .     # lint
 uv run ruff format .    # format
 uv run pyright --project pyproject.toml   # 类型检查（strict）
 uv run pytest           # 测试
-uv run pre-commit install
+uv run prek install      # 装 git 钩子（prek 是 pre-commit 的 Rust 替代，配置同一份）
 ```
 
 > ⚠️ **`pyright` 必须带 `--project pyproject.toml`。**
