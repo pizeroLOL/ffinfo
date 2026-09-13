@@ -17,11 +17,12 @@ import sqlite3
 from collections.abc import Mapping
 from contextlib import closing
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Final
 
 from ffinfo.errors import ConfigurationError
+from ffinfo_cli._time import from_microseconds, to_microseconds
 
 __all__ = [
     "PLACES_FILENAME",
@@ -39,9 +40,6 @@ PLACES_FILENAME: Final = "places.sqlite"
 """Firefox 把历史与书签都放在这个文件里。"""
 
 _INI_FILENAME: Final = "profiles.ini"
-
-_MICROSECONDS: Final = 1_000_000
-"""``moz_historyvisits.visit_date`` 的单位 —— PRTime，微秒。"""
 
 _SIDECARS: Final = ("-wal", "-shm")
 """WAL 模式下的附属文件。Firefox 跑着的时候最近的记录就躺在 ``-wal`` 里。"""
@@ -231,7 +229,7 @@ def read_visits(database: Path, *, since: datetime | None = None) -> tuple[Local
     params: list[int] = []
     if since is not None:
         sql += "  AND v.visit_date >= ?\n"
-        params.append(_to_microseconds(since))
+        params.append(to_microseconds(since))
     sql += "ORDER BY v.visit_date"
 
     try:
@@ -245,7 +243,7 @@ def read_visits(database: Path, *, since: datetime | None = None) -> tuple[Local
         LocalVisit(
             url=str(row["url"] or ""),
             title=str(row["title"] or ""),
-            visited_at=_from_microseconds(int(row["visit_date"])),
+            visited_at=from_microseconds(int(row["visit_date"])),
             visit_type=int(row["visit_type"]),
         )
         for row in rows
@@ -273,28 +271,6 @@ def _open_read_only(database: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     return connection
-
-
-def _to_microseconds(moment: datetime) -> int:
-    """UTC datetime → 微秒。
-
-    **不写 ``moment.timestamp() * 1e6``**：那是浮点，1.7e15 这个量级上会差零点几微秒。
-    """
-    delta = moment.astimezone(UTC) - _EPOCH
-    return (delta.days * 86_400 + delta.seconds) * _MICROSECONDS + delta.microseconds
-
-
-def _from_microseconds(value: int) -> datetime:
-    """微秒 → UTC datetime，同样**不走浮点**。
-
-    合并两个源靠的就是时间戳逐微秒相等：云端那条和本地那条只要差 1 微秒，
-    去重就会失败、同一次访问会出两行。
-    """
-    seconds, micros = divmod(value, _MICROSECONDS)
-    return datetime.fromtimestamp(seconds, tz=UTC).replace(microsecond=micros)
-
-
-_EPOCH: Final = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def _profiles_from_ini(root: Path) -> list[Profile]:

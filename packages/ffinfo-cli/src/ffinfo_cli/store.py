@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from piccolo.columns import BigInt, DoublePrecision, Integer, Text, Varchar
@@ -21,18 +22,23 @@ from piccolo.engine.sqlite import SQLiteEngine
 from piccolo.table import Table
 
 from ffinfo.storage import EncryptedBso
+from ffinfo_cli._time import from_microseconds, to_microseconds
 
 __all__ = [
     "ApplyResult",
     "CollectionBatch",
+    "LocalVisitRow",
+    "StoredVisit",
     "SyncCursor",
     "SyncRecord",
     "load_cursor",
+    "load_local_visits",
     "load_records",
     "open_database",
     "replace_collection",
     "save_cursor",
     "store_batches",
+    "store_local_visits",
 ]
 
 
@@ -61,6 +67,32 @@ class SyncCursor(Table, tablename="sync_cursors"):
     last_modified: DoublePrecision = DoublePrecision()
     synced_at: DoublePrecision = DoublePrecision()
     records: Integer = Integer()
+
+
+class LocalVisitRow(Table, tablename="local_visits"):
+    """本地 ``places.sqlite`` 来的一次访问 —— **明文**，没有解密这回事。
+
+    与 ``sync_records`` 分表是设计文档决策 12 定的：两个源不硬凑成一张，
+    查询时才合并。``machine`` 是导出那台机器的名字（同一个库将来可能收下好几台）。
+    """
+
+    machine: Varchar = Varchar(length=128, index=True)
+    url: Text = Text()
+    title: Text = Text()
+    visited_at: BigInt = BigInt(index=True)
+    """PRTime 微秒 —— 存整数不存浮点，合并时靠它**逐微秒相等**去重。"""
+    visit_type: Integer = Integer()
+
+
+@dataclass(frozen=True, slots=True)
+class StoredVisit:
+    """库里的一次本地访问。"""
+
+    machine: str
+    url: str
+    title: str
+    visited_at: datetime
+    visit_type: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,7 +125,7 @@ def _bind(engine: SQLiteEngine) -> None:
     piccolo 的表是类级别的单例，"绑哪个库"只能挂在类上 —— 所以每次操作都显式重绑一次，
     测试才能各用各的临时库（见 ``tests/test_store.py``）。
     """
-    for table in (SyncRecord, SyncCursor):
+    for table in (LocalVisitRow, SyncRecord, SyncCursor):
         table._meta.db = engine
 
 
@@ -104,6 +136,7 @@ async def open_database(path: Path) -> SQLiteEngine:
     _bind(engine)
     await SyncRecord.create_table(if_not_exists=True)
     await SyncCursor.create_table(if_not_exists=True)
+    await LocalVisitRow.create_table(if_not_exists=True)
     return engine
 
 
@@ -263,3 +296,75 @@ async def load_records(engine: SQLiteEngine, collection: str) -> list[tuple[str,
         SyncRecord.collection == collection
     )
     return [(str(row["record_id"]), row["payload"]) for row in rows]
+
+
+# ── 本地源（places.sqlite 来的） ──────────────────────────────────────────
+
+
+async def store_local_visits(engine: SQLiteEngine, visits: Sequence[StoredVisit]) -> ApplyResult:
+    """写入本地访问。**幂等** —— 同一份导出再导一次，条数不会翻倍。
+
+    认"同一次访问"靠 ``(machine, url, visited_at)``：那个自增主键在"删了重插"之后会
+    重排（04 号 ticket 实测），拿它当身份会串行。同一批里重复出现的也在这里顺手去重。
+
+    标题变了算 ``updated``（Firefox 会改标题，那是同一次访问，不该多出一行）。
+    """
+    _bind(engine)
+    existing = {
+        (str(row["machine"]), str(row["url"]), int(row["visited_at"])): (
+            row["id"],
+            str(row["title"]),
+        )
+        for row in await LocalVisitRow.select(
+            LocalVisitRow.id,
+            LocalVisitRow.machine,
+            LocalVisitRow.url,
+            LocalVisitRow.visited_at,
+            LocalVisitRow.title,
+        )
+    }
+
+    fresh: list[LocalVisitRow] = []
+    updates: list[tuple[int, str]] = []
+    seen: set[tuple[str, str, int]] = set()
+    for item in visits:
+        key = (item.machine, item.url, to_microseconds(item.visited_at))
+        if key in seen:
+            continue
+        seen.add(key)
+        found = existing.get(key)
+        if found is None:
+            fresh.append(
+                LocalVisitRow(
+                    machine=item.machine,
+                    url=item.url,
+                    title=item.title,
+                    visited_at=key[2],
+                    visit_type=item.visit_type,
+                )
+            )
+        elif found[1] != item.title:
+            updates.append((found[0], item.title))
+
+    if fresh:
+        await LocalVisitRow.insert(*fresh)
+    for row_id, title in updates:
+        await LocalVisitRow.update({LocalVisitRow.title: title}).where(LocalVisitRow.id == row_id)
+
+    return ApplyResult(inserted=len(fresh), updated=len(updates), deleted=0)
+
+
+async def load_local_visits(engine: SQLiteEngine) -> tuple[StoredVisit, ...]:
+    """读出全部本地访问，按时间升序。**没导入过就是空元组** —— 单源降级走这条路。"""
+    _bind(engine)
+    rows = await LocalVisitRow.select().order_by(LocalVisitRow.visited_at)
+    return tuple(
+        StoredVisit(
+            machine=str(row["machine"]),
+            url=str(row["url"]),
+            title=str(row["title"]),
+            visited_at=from_microseconds(int(row["visited_at"])),
+            visit_type=int(row["visit_type"]),
+        )
+        for row in rows
+    )
