@@ -1,5 +1,9 @@
 # Domain Docs
 
+> **这一页描述的是可选的工作流，不是项目的组成部分。**
+> 它写给装了那套工程 skill 的 agent 看 —— 没有那些 skill 的话，跳过这一页没有任何损失。
+> `CONTEXT.md` 与 `docs/adr/` **目前都还没建**（下面说的"不存在就静默略过"就是这种情况）。
+
 How the engineering skills should consume this repo's domain documentation when exploring the codebase.
 
 ## Before exploring, read these

@@ -1,5 +1,9 @@
 # Issue tracker: Local Markdown
 
+> **这一页描述的是可选的本地流程，不是项目的组成部分。**
+> `.scratch/` 在 `.gitignore` 里 —— 别人 clone 下来**没有**这些文件，
+> 少了它们不影响构建、测试、运行。它只是"作者本地怎么记工单"的约定。
+
 Issues and specs for this repo live as markdown files in `.scratch/`.
 
 ## Conventions

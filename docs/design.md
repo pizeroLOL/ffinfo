@@ -178,6 +178,24 @@ struct HistoryRecord {
 }
 ```
 
+> **2026-09-14 实测补记 —— 落到 JSON 上的字段名和单位**
+>
+> 上面是 Rust 结构体，实际传输的 JSON 长这样（`#[serde(rename_all = "camelCase")]`）：
+>
+> ```json
+> {"id": "…", "title": "…", "histUri": "https://…",
+>  "visits": [{"date": 1788444520420000, "type": 1}]}
+> ```
+>
+> - 访问类型的字段名是 **`type`**，不是 Rust 里的 `transition` —— 照结构体抄会 KeyError
+> - `date` 是**微秒**（`ServerVisitTimestamp` = 毫秒 × 1000）。差三个数量级，时间会飘到 1970
+> - `title` 可能是 `null`，也可能整个字段不存在 —— 两种都当空串（上游也是这么处理的）
+> - `type = 10`（`UpdatePlace`）按上游注释**不是一次真正的页面访问**，但确实会出现在记录里。
+>   照实标名字、不偷偷丢掉，算不算"浏览"由消费方决定
+>
+> **数量级**：一个真实账号 4892 条记录解出 **12110 次访问**（平均 2.5 次/条）——
+> 所以"拍平成一次访问一行"不是可选项：不拍平会丢掉六成的浏览记录。
+
 **Sync 集合**（`sync15/src/client/state.rs` 的 `DEFAULT_ENGINES`）：
 `passwords` · `clients` · `addons` · `addresses` · `bookmarks` · `creditcards` · `forms` · `history` · `prefs` · `tabs`
 另有内部集合：`meta` · `crypto` · `keys`

@@ -14,22 +14,31 @@
 
 ```bash
 uv sync
-uv run ffinfo-cli --help
+uv run ffinfo-cli login              # 浏览器里授权一次，密码不经过本工具
+uv run ffinfo-cli sync               # 从 Sync 拉数据，输出 JSON
+uv run ffinfo-cli list --limit 20    # 解密后的浏览历史，输出 JSON
 ```
 
 ## 开发
 
 ```bash
-uv run ruff check .        # lint
-uv run ruff format .       # format
-uv run pyright             # 类型检查
-uv run pytest              # 测试
-uv run pre-commit install  # 装 git hooks
+uv run ruff check .                       # lint
+uv run ruff format .                      # format
+uv run pyright --project pyproject.toml   # 类型检查（strict）
+uv run pytest                             # 测试
+uv run prek install                       # 装 git 钩子
 ```
 
-## 设计文档
+> `pyright` 要带 `--project pyproject.toml` —— 它会向上遍历目录找祖先里的
+> `pyrightconfig.json` 并优先用那个。细节见 [`AGENTS.md`](AGENTS.md)。
 
-见 [`docs/design.md`](docs/design.md)。
+## 文档
+
+- [`docs/design.md`](docs/design.md) —— **设计与决策归档，自包含**：19 条决策、每条技术事实
+  都带源码出处。想接手这个项目，读它一份就够。
+- [`AGENTS.md`](AGENTS.md) —— 工作约定：开发命令、硬性约束、本地工单放在哪。
+- `docs/agents/` —— 一套**可选**的工单/领域文档约定，描述的是作者本地的协作流程。
+  里面提到的 `.scratch/` 不在版本控制里，clone 下来没有是正常的。
 
 ## 许可
 
