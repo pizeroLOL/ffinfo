@@ -82,6 +82,7 @@ def test_authorization_url_carries_everything_mozilla_needs() -> None:
     assert params["redirect_uri"] == [REDIRECT_URI]
     assert params["scope"] == [SCOPE]
     assert params["state"] == [request.state]
+    assert params["response_type"] == ["code"]
     assert params["code_challenge"] == [request.pkce.challenge]
     assert params["code_challenge_method"] == ["S256"]
     assert params["access_type"] == ["offline"]

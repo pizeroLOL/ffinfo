@@ -66,7 +66,10 @@ def _decode_base64(data: str, what: str, error: type[FfinfoError]) -> bytes:
 
 def _decode_base64url(data: str, what: str, error: type[FfinfoError]) -> bytes:
     try:
-        return base64.urlsafe_b64decode(data + "=" * (-len(data) % _URLSAFE_PAD))
+        # urlsafe_b64decode 会把非法字符**静默丢掉** —— 用 altchars + validate 才与
+        # _decode_base64 是同一份契约：坏输入必须报错，不能悄悄解出一个别的东西。
+        padded = data + "=" * (-len(data) % _URLSAFE_PAD)
+        return base64.b64decode(padded, altchars=b"-_", validate=True)
     except (binascii.Error, ValueError) as exc:
         msg = f"{what} 不是合法的 base64url"
         raise error(msg) from exc

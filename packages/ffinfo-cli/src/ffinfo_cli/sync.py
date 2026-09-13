@@ -32,7 +32,7 @@ from ffinfo.storage import (
 )
 from ffinfo_cli.store import (
     CollectionBatch,
-    SyncRecord,
+    count_records,
     load_cursor,
     open_database,
     save_cursor,
@@ -73,8 +73,11 @@ class SyncReport(BaseModel):
     records: int
     """库里现在总共有多少条。"""
     inserted: int
+    """这次新落库的条数。"""
     updated: int
+    """这次覆盖的条数（同一个 id 已有，内容更新了）。"""
     deleted: int
+    """这次删掉的条数 —— **全量时就是对账的那个数**：服务器上没了的记录。"""
     pages: int
     tombstones: int
     """这次服务器报了几条删除。"""
@@ -169,7 +172,7 @@ async def run_sync(
             name,
             last_modified=fetches[name].last_modified,
             synced_at=now,
-            records=await _count(name),
+            records=await count_records(engine, name),
         )
 
     main = fetches[collection]
@@ -177,7 +180,7 @@ async def run_sync(
     return SyncReport(
         collection=collection,
         mode="full" if cursors[collection] is None else "incremental",
-        records=await _count(collection),
+        records=await count_records(engine, collection),
         inserted=applied.inserted,
         updated=applied.updated,
         deleted=applied.deleted,
@@ -190,11 +193,6 @@ async def run_sync(
         elapsed_seconds=round(clock() - started, 2),
         protocol={name: fetches[name].count for name in _PROTOCOL_COLLECTIONS},
     )
-
-
-async def _count(collection: str) -> int:
-    """库里这个 collection 现在有多少条。"""
-    return await SyncRecord.count().where(SyncRecord.collection == collection)
 
 
 def sync_blocking(

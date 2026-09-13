@@ -69,6 +69,24 @@ def test_scoped_key_with_wrong_length_is_rejected() -> None:
         key.to_key_bundle()
 
 
+def test_scoped_key_with_invalid_base64url_is_rejected() -> None:
+    """``k`` 里有 base64url 字符集之外的字符 —— 解码器必须拒绝，不能静默丢字符。"""
+    payload = json.dumps(
+        {
+            OLD_SYNC_SCOPE: {
+                "kty": "oct",
+                "scope": OLD_SYNC_SCOPE,
+                "k": "!!!!not-base64url!!!!",
+                "kid": "1-x",
+            }
+        }
+    )
+    key = parse_scoped_keys(payload)[OLD_SYNC_SCOPE]
+
+    with pytest.raises(KeyDerivationError, match="不是合法的 base64url"):
+        key.key_bytes()
+
+
 @pytest.mark.parametrize(
     "payload",
     [

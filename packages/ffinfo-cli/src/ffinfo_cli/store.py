@@ -33,6 +33,7 @@ __all__ = [
     "StoredVisit",
     "SyncCursor",
     "SyncRecord",
+    "count_records",
     "load_cursor",
     "load_local_visits",
     "load_records",
@@ -369,6 +370,12 @@ async def load_records(engine: SQLiteEngine, collection: str) -> list[tuple[str,
         SyncRecord.collection == collection
     )
     return [(str(row["record_id"]), row["payload"]) for row in rows]
+
+
+async def count_records(engine: SQLiteEngine, collection: str) -> int:
+    """库里这个 collection 现在有多少条。"""
+    _bind(engine)
+    return await SyncRecord.count().where(SyncRecord.collection == collection)
 
 
 # ── 本地源（places.sqlite 来的） ──────────────────────────────────────────

@@ -202,6 +202,8 @@ class OAuthClient:
                 "redirect_uri": self._redirect_uri,
                 "scope": " ".join(scopes),
                 "state": state,
+                # RFC 6749 的授权码流程要求带上它 —— 不指望服务端的默认值
+                "response_type": "code",
                 "code_challenge": pkce.challenge,
                 "code_challenge_method": "S256",
                 "access_type": "offline",
