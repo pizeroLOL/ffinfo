@@ -26,9 +26,10 @@ _IDENTITY_MODE: Final = 0o600
 class AgeIdentity:
     """age 私钥，外加"文件权限"这条安全纪律。
 
-    落盘一律 0600；读盘时**只接受 0600** —— 权限宽了就拒绝启动，不做"默默不安全"的事。
+    落盘一律 0600；读盘时**只接受不宽于 0600** 的权限 —— 宽了就拒绝启动，
+    不做"默默不安全"的事。
 
-    Windows 没有 POSIX 权限位（文件保护走 ACL），那边跳过这项检查：
+    Windows 没有 POSIX 权限位，那边跳过这项检查（**也不假装有 ACL 保护**）：
     报一个用户永远修不好的错没有意义。macOS / Linux 照常。
     """
 
@@ -68,24 +69,8 @@ class AgeIdentity:
     # ── 落盘 ──────────────────────────────────────────────────────────────
 
     def to_file(self, path: Path) -> None:
-        """写到调用者指定的路径。POSIX 上权限 0600；Windows 上走 ACL。"""
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, _IDENTITY_MODE)
-        except OSError as exc:
-            msg = f"写不了私钥文件 {path}：{exc.strerror}"
-            raise ConfigurationError(msg) from exc
-        try:
-            os.write(fd, str(self._identity).encode("utf-8"))
-            if hasattr(os, "fchmod"):
-                # os.open 的 mode 会被 umask 削，显式再设一次。
-                # Windows 没有 fchmod，那边不做这一步。
-                os.fchmod(fd, _IDENTITY_MODE)
-        except OSError as exc:
-            msg = f"写不了私钥文件 {path}：{exc.strerror}"
-            raise ConfigurationError(msg) from exc
-        finally:
-            os.close(fd)
+        """写到调用者指定的路径；POSIX 上权限 0600（Windows 上没有这一步）。"""
+        _write_private(path, str(self._identity).encode("utf-8"), "私钥文件")
 
     # ── 加解密 ────────────────────────────────────────────────────────────
 
@@ -130,14 +115,9 @@ class CredentialStore:
         return self._path
 
     def save(self, credentials: str) -> None:
-        """加密后落盘（覆盖已有内容）。"""
+        """加密后落盘（覆盖已有内容）；POSIX 上权限 0600。"""
         ciphertext = self._identity.encrypt(credentials.encode("utf-8"))
-        try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_bytes(ciphertext)
-        except OSError as exc:
-            msg = f"写不了凭据文件 {self._path}：{exc.strerror}"
-            raise ConfigurationError(msg) from exc
+        _write_private(self._path, ciphertext, "凭据文件")
 
     def load(self) -> str:
         """读盘并解密。"""
@@ -149,11 +129,39 @@ class CredentialStore:
         except OSError as exc:
             msg = f"读不了凭据文件 {self._path}：{exc.strerror}"
             raise ConfigurationError(msg) from exc
-        return self._identity.decrypt(ciphertext).decode("utf-8")
+        cleartext = self._identity.decrypt(ciphertext)
+        try:
+            return cleartext.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            msg = f"凭据文件 {self._path} 解出来不是合法的 UTF-8 —— 密文或私钥可能不对"
+            raise ConfigurationError(msg) from exc
+
+
+def _write_private(path: Path, data: bytes, what: str) -> None:
+    """以 0600 落盘。
+
+    ``os.open`` 的 mode 会被 umask 削，所以 ``fchmod`` 那一步不是多余的；
+    Windows 没有 ``fchmod``，那边跳过 —— 不做假动作。
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, _IDENTITY_MODE)
+    except OSError as exc:
+        msg = f"写不了{what} {path}：{exc.strerror}"
+        raise ConfigurationError(msg) from exc
+    try:
+        os.write(fd, data)
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, _IDENTITY_MODE)
+    except OSError as exc:
+        msg = f"写不了{what} {path}：{exc.strerror}"
+        raise ConfigurationError(msg) from exc
+    finally:
+        os.close(fd)
 
 
 def _require_private_permissions(path: Path) -> None:
-    """只接受 0600；别的值一律带着"怎么修"一起报错。
+    """只接受**不宽于 0600** 的权限（0600 / 0400 都行）；更宽的一律带着"怎么修"一起报错。
 
     Windows 上直接放行 —— 见 :class:`AgeIdentity` 的说明。
     """
@@ -170,9 +178,9 @@ def _require_private_permissions(path: Path) -> None:
         return
 
     mode = stat.S_IMODE(stat_result.st_mode)
-    if mode != _IDENTITY_MODE:
+    if mode & ~_IDENTITY_MODE:
         msg = (
-            f"私钥文件 {path} 的权限是 {mode:04o}，必须是 600 —— "
-            f"否则同机器上的其他用户可能读到它。修：chmod 600 {path}"
+            f"私钥文件 {path} 的权限是 {mode:04o}，宽于 600 —— "
+            f"同机器上的其他用户可能读到它。修：chmod 600 {path}"
         )
         raise ConfigurationError(msg)

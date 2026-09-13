@@ -17,7 +17,7 @@ from ffinfo.credentials import AgeIdentity, CredentialStore
 from ffinfo.errors import ConfigurationError, DecryptionError
 
 _POSIX_ONLY = pytest.mark.skipif(
-    os.name != "posix", reason="POSIX 权限位在 Windows 上不存在（那边走 ACL）"
+    os.name != "posix", reason="POSIX 权限位在 Windows 上不存在（那边不做这一步）"
 )
 
 CREDENTIALS = '{"access_token": "secret-token-abc", "refresh_token": "secret-refresh-xyz"}'
@@ -94,7 +94,29 @@ def test_identity_is_written_0600(tmp_path: Path) -> None:
 
 
 @_POSIX_ONLY
-@pytest.mark.parametrize("mode", [0o644, 0o640, 0o660, 0o777, 0o400])
+def test_identity_is_written_0600_even_under_a_loose_umask(tmp_path: Path) -> None:
+    """umask 会把 os.open 的 mode 削掉 —— fchmod 那一步就是防这个的。"""
+    path = tmp_path / "age-key.txt"
+    previous = os.umask(0o000)
+    try:
+        AgeIdentity.generate().to_file(path)
+    finally:
+        os.umask(previous)
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+@_POSIX_ONLY
+def test_credentials_are_written_0600(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+
+    store.save(CREDENTIALS)
+
+    assert stat.S_IMODE(store.path.stat().st_mode) == 0o600
+
+
+@_POSIX_ONLY
+@pytest.mark.parametrize("mode", [0o644, 0o640, 0o660, 0o777, 0o700])
 def test_wide_or_odd_permissions_are_refused(tmp_path: Path, mode: int) -> None:
     path = _identity_file(tmp_path)
     path.chmod(mode)
@@ -105,6 +127,17 @@ def test_wide_or_odd_permissions_are_refused(tmp_path: Path, mode: int) -> None:
     message = str(excinfo.value)
     assert "chmod" in message  # 错误信息要能直接照着修
     assert "600" in message
+
+
+@_POSIX_ONLY
+def test_narrower_permissions_are_accepted(tmp_path: Path) -> None:
+    """0400 比 600 **更窄**，没有理由拒绝。"""
+    path = _identity_file(tmp_path)
+    path.chmod(0o400)
+
+    identity = AgeIdentity.from_file(path)
+
+    assert identity.decrypt(identity.encrypt(b"still works")) == b"still works"
 
 
 def test_missing_identity_file_is_refused(tmp_path: Path) -> None:
@@ -148,6 +181,18 @@ def test_tampered_ciphertext_is_refused(tmp_path: Path) -> None:
     store.path.write_bytes(bytes(blob))
 
     with pytest.raises(DecryptionError):
+        store.load()
+
+
+def test_non_utf8_cleartext_is_refused(tmp_path: Path) -> None:
+    """解出来的明文不是 UTF-8 —— 也要收敛成 ConfigurationError，不漏裸 UnicodeDecodeError。"""
+    identity_path = _identity_file(tmp_path)
+    identity = AgeIdentity.from_file(identity_path)
+    path = tmp_path / "credentials.age"
+    path.write_bytes(identity.encrypt(b"\xff\xfe\x00 not utf-8 at all"))
+    store = CredentialStore(identity=identity, path=path)
+
+    with pytest.raises(ConfigurationError):
         store.load()
 
 
