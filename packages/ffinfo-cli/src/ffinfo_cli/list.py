@@ -249,15 +249,12 @@ def _history_report(
         decrypted.records, len(decrypted.entries), len(decrypted.skipped), fallback=len(local)
     )
 
-    selected = _merge_history(decrypted.entries, local)
-    if since is not None:
-        selected = [item for item in selected if item.visited_at >= since]
-    if domain is not None:
-        selected = [item for item in selected if matches_domain(item.url, domain)]
-    if search is not None:
-        selected = [
-            item for item in selected if matches_search(item.url, item.title, needle=search)
-        ]
+    matches = _keeper(since=since, domain=domain, search=search)
+    selected = [
+        item
+        for item in _merge_history(decrypted.entries, local)
+        if matches(when=item.visited_at, url=item.url, title=item.title)
+    ]
     selected.sort(key=lambda item: item.visited_at, reverse=True)
 
     returned = _truncate(selected, limit)
@@ -374,12 +371,10 @@ def _bookmark_report(
     decrypted = parse_bookmarks(records, key)
     _guard_all_failed(decrypted.records, len(decrypted.roots), len(decrypted.skipped))
 
+    matches = _keeper(since=since, domain=domain, search=search)
+
     def keep(node: BookmarkNode) -> bool:
-        if since is not None and (node.added_at is None or node.added_at < since):
-            return False
-        if domain is not None and not matches_domain(node.url, domain):
-            return False
-        return not (search is not None and not matches_search(node.title, node.url, needle=search))
+        return matches(when=node.added_at, url=node.url, title=node.title)
 
     filtered = _prune(decrypted.roots, keep)
     bookmarks = [node for node in _flatten(filtered) if node.type != "folder"]
@@ -413,14 +408,10 @@ def _tabs_report(
     decrypted = parse_tabs(records, key)
     _guard_all_failed(decrypted.records, len(decrypted.clients), len(decrypted.skipped))
 
+    matches = _keeper(since=since, domain=domain, search=search)
+
     def keep(entry: TabEntry) -> bool:
-        if since is not None and (entry.last_used_at is None or entry.last_used_at < since):
-            return False
-        if domain is not None and not matches_domain(entry.url, domain):
-            return False
-        return not (
-            search is not None and not matches_search(entry.title, entry.url, needle=search)
-        )
+        return matches(when=entry.last_used_at, url=entry.url, title=entry.title)
 
     clients = [
         ClientTabs(
@@ -475,6 +466,25 @@ def _details(skipped: Sequence[tuple[str, str]]) -> list[dict[str, str]]:
         {"record_id": record_id, "reason": reason}
         for record_id, reason in skipped[:_MAX_SKIPPED_DETAILS]
     ]
+
+
+def _keeper(
+    *, since: datetime | None, domain: str | None, search: str | None
+) -> Callable[..., bool]:
+    """把 ``--since`` / ``--domain`` / ``--search`` 绑成一个谓词 —— **口径只写这一处**。
+
+    三种数据类型各提供自己的字段（``when`` / ``url`` / ``title``）；``when`` 缺失算不匹配
+    （没有时间的记录进不了"某时间之后"）。三个过滤器一起作用，不是逐个筛。
+    """
+
+    def matches(*, when: datetime | None, url: str | None, title: str) -> bool:
+        if since is not None and (when is None or when < since):
+            return False
+        if domain is not None and not matches_domain(url, domain):
+            return False
+        return not (search is not None and not matches_search(title, url, needle=search))
+
+    return matches
 
 
 def _truncate(entries: list[Any], limit: int | None) -> list[Any]:

@@ -781,6 +781,39 @@ async def test_tabs_limit_counts_tabs_not_clients(tmp_path: Path) -> None:
     assert [tab.title for tab in report.clients[0].tabs] == ["一", "二"]
 
 
+async def test_the_same_filter_semantics_apply_to_all_three_types(tmp_path: Path) -> None:
+    """``--domain`` / ``--since`` / ``--search`` 在三种数据类型上是**同一套**语义。
+
+    口径只写一遍（``_keeper``）—— R5 那类"三个数自相矛盾"就是从三份拷贝里长出来的。
+    """
+    await build_db(
+        tmp_path,
+        [
+            history_record("hit", url="https://example.com/"),
+            history_record("miss", url="https://other.test/"),
+        ],
+        bookmarks=[
+            bookmark_record("b-hit", parent_id=None, url="https://example.com/"),
+            bookmark_record("b-miss", parent_id=None, url="https://other.test/"),
+        ],
+        tabs=[
+            tabs_record(
+                "dev",
+                client_name="alpha",
+                entries=[("一", "https://example.com/", 1), ("二", "https://other.test/", 2)],
+            )
+        ],
+    )
+
+    history = await run(tmp_path, domain="example.com")
+    bookmarks = await run(tmp_path, data_type="bookmarks", domain="example.com")
+    tabs = await run(tmp_path, data_type="tabs", domain="example.com")
+
+    assert [item.record_id for item in history.items] == ["hit"]
+    assert [node.id for node in bookmarks.tree] == ["b-hit"]
+    assert [tab.url for client in tabs.clients for tab in client.tabs] == ["https://example.com/"]
+
+
 async def test_bookmark_since_filter_compares_real_times(tmp_path: Path) -> None:
     """``--since`` 对书签走真时间比较 —— 与 history 同一个口径。"""
     await build_db(
