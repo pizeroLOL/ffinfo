@@ -8,6 +8,7 @@ license = { text = "MPL-2.0" }
 dependencies = [
     "httpx>=0.27",
     "pydantic>=2.9",
+    "pyrage>=1.4.0",
 ]
 
 [build-system]
