@@ -9,11 +9,16 @@ PKCE 那条用的是 **RFC 7636 Appendix B 的官方测试向量**，不是自�
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import os
+import struct
 from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from ffinfo.credentials import AgeIdentity, CredentialStore
 from ffinfo.errors import AuthError
@@ -252,12 +257,63 @@ async def test_network_failure_is_reported() -> None:
         await client.exchange_code(code="abc123", request=request)
 
 
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _unb64url(data: str) -> bytes:
+    return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+
+
+def _encrypt_for(public_jwk: dict[str, str], cleartext: str) -> str:
+    """照 RFC 7518 §4.6.2 造一条 ECDH-ES + A256GCM 的 JWE —— **测试里的独立实现**。
+
+    故意不复用库里的代码：这一条验的就是"我们发出去的公钥，别人按规范加密，
+    我们解得开"，两侧各写各的才算数。
+    """
+    sender = ec.generate_private_key(ec.SECP256R1())
+    numbers = sender.public_key().public_numbers()
+    header = {
+        "alg": "ECDH-ES",
+        "enc": "A256GCM",
+        "epk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": _b64url(numbers.x.to_bytes(32, "big")),
+            "y": _b64url(numbers.y.to_bytes(32, "big")),
+        },
+    }
+    header_b64 = _b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+
+    peer = ec.EllipticCurvePublicNumbers(
+        int.from_bytes(_unb64url(public_jwk["x"]), "big"),
+        int.from_bytes(_unb64url(public_jwk["y"]), "big"),
+        ec.SECP256R1(),
+    ).public_key()
+    shared = sender.exchange(ec.ECDH(), peer)
+
+    algorithm = b"A256GCM"
+    other_info = (
+        struct.pack(">I", len(algorithm))
+        + algorithm
+        + struct.pack(">I", 0)  # apu
+        + struct.pack(">I", 0)  # apv
+        + struct.pack(">I", 256)
+    )
+    cek = hashlib.sha256(struct.pack(">I", 1) + shared + other_info).digest()
+
+    iv = os.urandom(12)
+    sealed = AESGCM(cek).encrypt(iv, cleartext.encode("utf-8"), header_b64.encode("ascii"))
+    return ".".join([header_b64, "", _b64url(iv), _b64url(sealed[:-16]), _b64url(sealed[-16:])])
+
+
 def test_key_pair_survives_the_round_trip_to_mozilla() -> None:
-    """授权请求里的公钥必须能解回自己发出去的那条 JWE。"""
+    """授权请求里的公钥必须能解回"发给它"的那条 JWE —— 真做一次往返。"""
     request = _client().start_authorization(scopes=[SCOPE])
 
-    assert isinstance(request.key_pair, EphemeralKeyPair)
-    assert request.key_pair.public_jwk()["crv"] == "P-256"
+    jwe = _encrypt_for(request.key_pair.public_jwk(), '{"scope": "oldsync"}')
+
+    assert request.key_pair.decrypt_jwe(jwe) == '{"scope": "oldsync"}'
 
 
 # ── 凭据：整理、序列化、落盘 ──────────────────────────────────────────────

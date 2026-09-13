@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -260,3 +261,30 @@ async def test_old_databases_with_duplicate_rows_are_repaired(tmp_path: Path) ->
         ("history", "a", "new"),
         ("bookmarks", "a", "other"),
     ]
+
+
+class _FailsMidway(Sequence[EncryptedBso]):
+    """读到一半就炸的 records —— 模拟第二个 batch 写到一半出事。"""
+
+    def __len__(self) -> int:
+        return 1
+
+    def __getitem__(self, index: int) -> EncryptedBso:
+        msg = "磁盘满了"
+        raise RuntimeError(msg)
+
+
+async def test_store_batches_rolls_back_when_a_later_batch_fails(tmp_path: Path) -> None:
+    """**全成或全不写**：第二个 batch 炸了，第一个 batch 的字节也不许留下。"""
+    engine = await open_database(tmp_path / "db.sqlite")
+
+    with pytest.raises(RuntimeError, match="磁盘满了"):
+        await store_batches(
+            engine,
+            [
+                CollectionBatch(collection="bookmarks", records=[record("keep")], full=True),
+                CollectionBatch(collection="history", records=_FailsMidway(), full=True),
+            ],
+        )
+
+    assert await SyncRecord.count() == 0

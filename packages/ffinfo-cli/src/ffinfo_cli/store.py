@@ -213,9 +213,12 @@ async def _replace(
 
     ``deleted`` 报的是**真的没了的那部分**（老行里没被重插的）—— ``--full`` 的对账
     就靠它：agent 问"全量之后什么被删了"，答案不能永远是 0。
+
+    同一批里同 id 出现多次时与增量一样只认最新的一条（跨页重复不该把整次同步打翻）。
     """
-    rows = [_row(collection, record) for record in records if record.payload is not None]
-    after = {record.id for record in records if record.payload is not None}
+    live = [record for record in _newest_per_id(records) if record.payload is not None]
+    rows = [_row(collection, record) for record in live]
+    after = {record.id for record in live}
     before = {
         str(row["record_id"])
         for row in await SyncRecord.select(SyncRecord.record_id).where(

@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from ffinfo.credentials import AgeIdentity, CredentialStore
-from ffinfo.errors import BackoffError, ConfigurationError
+from ffinfo.errors import BackoffError, ConfigurationError, SyncProtocolError
 from ffinfo.keys import OLD_SYNC_SCOPE, ScopedKey
 from ffinfo.oauth import Credentials
 from ffinfo_cli.store import SyncCursor, SyncRecord, load_cursor, open_database
@@ -260,7 +260,7 @@ async def test_count_mismatch_leaves_database_untouched(tmp_path: Path) -> None:
     fake.counts = {"history": 5}
     fake.pages = [[bso("a")]]
 
-    with pytest.raises(Exception, match="服务器报告有 5 条"):
+    with pytest.raises(SyncProtocolError, match="服务器报告有 5 条"):
         await sync(tmp_path, fake)
 
     assert await stored(tmp_path) == 0
