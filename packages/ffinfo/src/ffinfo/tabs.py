@@ -96,7 +96,8 @@ class TabEntry:
     client_name: str
     title: str
     url: str | None
-    last_used_at: str | None
+    last_used_at: datetime | None
+    """最后使用时间（UTC ``datetime``）—— 与 history / bookmarks 同一个口径，JSON 里仍是 ISO。"""
     icon: str | None
     window_id: str | None
 
@@ -167,9 +168,7 @@ def _client(record: TabsRecord) -> ClientTabs:
                 client_name=record.client_name or record.id,
                 title=tab.title,
                 url=tab.url,
-                last_used_at=(
-                    tab.last_used_at.isoformat() if tab.last_used_at is not None else None
-                ),
+                last_used_at=tab.last_used_at,
                 icon=tab.icon,
                 window_id=tab.window_id,
             )

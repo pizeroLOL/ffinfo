@@ -77,10 +77,11 @@ class BookmarkRecord(BaseModel):
 
     @property
     def added_at(self) -> datetime | None:
-        """添加时间（UTC）。``dateAdded`` 是**毫秒**。"""
+        """添加时间（UTC）。``dateAdded`` 是**毫秒** —— 整数运算，不走浮点。"""
         if self.date_added is None:
             return None
-        return datetime.fromtimestamp(self.date_added / _MILLISECONDS, tz=UTC)
+        seconds, millis = divmod(self.date_added, _MILLISECONDS)
+        return datetime.fromtimestamp(seconds, tz=UTC).replace(microsecond=millis * 1_000)
 
 
 class BookmarkNode(BaseModel):
@@ -92,7 +93,8 @@ class BookmarkNode(BaseModel):
     type: str
     title: str
     url: str | None = None
-    added_at: str | None = None
+    added_at: datetime | None = None
+    """添加时间（UTC ``datetime``）—— **与 history / tabs 同一个口径**，JSON 里仍是 ISO。"""
     parent_id: str | None = None
     parent_name: str | None = None
     children: list[BookmarkNode] = []
@@ -232,7 +234,7 @@ def _node(record: BookmarkRecord) -> BookmarkNode:
         type=record.type,
         title=record.title,
         url=record.url,
-        added_at=record.added_at.isoformat() if record.added_at is not None else None,
+        added_at=record.added_at,
         parent_id=record.parent_id,
         parent_name=record.parent_name,
     )

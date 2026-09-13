@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 from ffinfo.crypto import EncryptedPayload, KeyBundle
 from ffinfo.tabs import parse_tabs
@@ -52,7 +53,7 @@ def test_last_used_is_seconds() -> None:
 
     report = parse_tabs([("client1", encrypt(payload))], KEY)
 
-    assert report.entries[0].last_used_at == "2023-11-14T22:13:20+00:00"
+    assert report.entries[0].last_used_at == datetime(2023, 11, 14, 22, 13, 20, tzinfo=UTC)
 
 
 def test_url_comes_from_the_first_url_history_entry() -> None:

@@ -745,6 +745,23 @@ async def test_bookmark_cycles_reach_the_report_as_skipped(tmp_path: Path) -> No
     assert report.skipped == 2
 
 
+async def test_bookmark_json_is_serializable_with_iso_times(tmp_path: Path) -> None:
+    """时间字段在模型里是 ``datetime``，出去必须是 ISO 字符串 —— JSON 里形状不变。"""
+    await build_db(
+        tmp_path,
+        [],
+        bookmarks=[
+            bookmark_record("folder", kind="folder", parent_id=None, title="工具", url=None),
+            bookmark_record("bmk", parent_id="folder", title="示例"),
+        ],
+    )
+
+    report = await run(tmp_path, data_type="bookmarks")  # type: ignore[assignment]
+    payload = json.loads(report.to_json())
+
+    assert payload["tree"][0]["children"][0]["added_at"] == "2026-09-13T12:00:00+00:00"
+
+
 # ── 标签页（16 号） ───────────────────────────────────────────────────────
 
 
@@ -785,3 +802,64 @@ async def test_tabs_limit_counts_tabs_not_clients(tmp_path: Path) -> None:
     assert report.returned == 2
     assert [client.client_name for client in report.clients] == ["alpha"]
     assert [tab.title for tab in report.clients[0].tabs] == ["一", "二"]
+
+
+async def test_bookmark_since_filter_compares_real_times(tmp_path: Path) -> None:
+    """``--since`` 对书签走真时间比较 —— 与 history 同一个口径。"""
+    await build_db(
+        tmp_path,
+        [],
+        bookmarks=[
+            bookmark_record(
+                "old", parent_id=None, title="旧", date_added=ADDED_MILLIS - 86_400_000
+            ),
+            bookmark_record(
+                "new", parent_id=None, title="新", date_added=ADDED_MILLIS + 86_400_000
+            ),
+        ],
+    )
+
+    report = await run(tmp_path, data_type="bookmarks", since=DAY)  # type: ignore[assignment]
+
+    assert [node.id for node in report.tree] == ["new"]
+    assert report.returned == 1
+
+
+async def test_tabs_since_filter_compares_real_times(tmp_path: Path) -> None:
+    seconds = int(DAY.timestamp())
+    await build_db(
+        tmp_path,
+        [],
+        tabs=[
+            tabs_record(
+                "dev",
+                client_name="alpha",
+                entries=[
+                    ("旧", "https://a.test/", seconds - 3_600),
+                    ("新", "https://b.test/", seconds + 3_600),
+                ],
+            ),
+        ],
+    )
+
+    report = await run(tmp_path, data_type="tabs", since=DAY)  # type: ignore[assignment]
+
+    assert [tab.title for tab in report.clients[0].tabs] == ["新"]
+    assert report.returned == 1
+
+
+async def test_tabs_json_is_serializable_with_iso_times(tmp_path: Path) -> None:
+    await build_db(
+        tmp_path,
+        [],
+        tabs=[
+            tabs_record(
+                "dev", client_name="alpha", entries=[("一", "https://a.test/", 1_700_000_000)]
+            )
+        ],
+    )
+
+    report = await run(tmp_path, data_type="tabs")  # type: ignore[assignment]
+    payload = json.loads(report.to_json())
+
+    assert payload["clients"][0]["tabs"][0]["last_used_at"] == "2023-11-14T22:13:20+00:00"

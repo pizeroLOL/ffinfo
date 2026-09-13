@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 from ffinfo.bookmarks import (
     BookmarkNode,
@@ -71,7 +72,7 @@ def test_date_added_is_milliseconds() -> None:
     report = parse_bookmarks([("rec1", encrypt(bookmark_json("rec1")))], KEY)
 
     node = report.roots[0]
-    assert node.added_at == "2023-11-14T22:13:20+00:00"
+    assert node.added_at == datetime(2023, 11, 14, 22, 13, 20, tzinfo=UTC)
 
 
 def test_missing_date_added_is_fine() -> None:

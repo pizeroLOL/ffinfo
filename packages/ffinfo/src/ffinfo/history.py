@@ -84,8 +84,9 @@ class HistoryVisit(BaseModel):
 
     @property
     def visited_at(self) -> datetime:
-        """访问时间，UTC。"""
-        return datetime.fromtimestamp(self.date / _MICROSECONDS, tz=UTC)
+        """访问时间，UTC。**整数运算，不走浮点** —— 双源合并靠微秒逐位相等。"""
+        seconds, micros = divmod(self.date, _MICROSECONDS)
+        return datetime.fromtimestamp(seconds, tz=UTC).replace(microsecond=micros)
 
     @property
     def type_name(self) -> str:

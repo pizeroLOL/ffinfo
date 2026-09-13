@@ -133,7 +133,19 @@ class ListReport(BaseModel):
     def to_json(self) -> str:
         """给 agent 消费的 JSON。不相关的字段直接不输出。"""
         payload = self.model_dump(exclude=_EXCLUDED_FIELDS[self.data_type])
-        return json.dumps(payload, ensure_ascii=False, indent=2)
+        return json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default)
+
+
+def _json_default(value: object) -> str:
+    """``json.dumps`` 遇到富类型时的兜底 —— 目前只有时间字段的 ``datetime``。
+
+    **统一走 ``isoformat()``**（``+00:00``），与 history 的字符串格式逐字节一致；
+    pydantic 自己的 json 模式会写成 ``Z``，两种风格混在一份输出里不好。
+    """
+    if isinstance(value, datetime):
+        return value.isoformat()
+    msg = f"JSON 不认识这个类型：{type(value).__name__}"
+    raise TypeError(msg)
 
 
 def parse_since(raw: str) -> datetime:
@@ -364,7 +376,7 @@ def _bookmark_report(
     _guard_all_failed(decrypted.records, len(decrypted.roots), len(decrypted.skipped))
 
     def keep(node: BookmarkNode) -> bool:
-        if since is not None and (node.added_at is None or node.added_at < since.isoformat()):
+        if since is not None and (node.added_at is None or node.added_at < since):
             return False
         if domain is not None and not matches_domain(node.url, domain):
             return False
@@ -403,9 +415,7 @@ def _tabs_report(
     _guard_all_failed(decrypted.records, len(decrypted.clients), len(decrypted.skipped))
 
     def keep(entry: TabEntry) -> bool:
-        if since is not None and (
-            entry.last_used_at is None or entry.last_used_at < since.isoformat()
-        ):
+        if since is not None and (entry.last_used_at is None or entry.last_used_at < since):
             return False
         if domain is not None and not matches_domain(entry.url, domain):
             return False
