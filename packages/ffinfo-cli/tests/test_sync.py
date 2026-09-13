@@ -56,6 +56,9 @@ class FakeSync:
     def __init__(self) -> None:
         self.requests: list[httpx.Request] = []
         self.pages: list[list[dict[str, Any]]] = []
+        self.crypto_pages: list[list[dict[str, Any]]] = [
+            [{"id": "keys", "modified": 1.0, "payload": '{"ciphertext":"AAAA"}'}]
+        ]
         self.counts: dict[str, int] = {}
         self.storage_status = 200
         self.storage_headers: dict[str, str] = {}
@@ -66,12 +69,22 @@ class FakeSync:
         if path.endswith("/1.0/sync/1.5"):
             return httpx.Response(200, json=TOKEN_JSON)
         if path.endswith("info/collection_counts"):
-            return httpx.Response(200, json=self.counts)
+            # crypto 是协议数据，每次 sync 都会顺带拉 —— 计数由这个类自己兜住
+            return httpx.Response(200, json={"crypto": 1, **self.counts})
         if self.storage_status != 200:
             return httpx.Response(self.storage_status, headers=self.storage_headers)
+        if "/storage/crypto" in path:
+            return httpx.Response(
+                200, json=self.crypto_pages.pop(0), headers={"X-Last-Modified": "1.0"}
+            )
         return httpx.Response(
             200, json=self.pages.pop(0), headers={"X-Last-Modified": "1789320600.12"}
         )
+
+
+def storage_requests(fake: FakeSync, collection: str) -> list[httpx.Request]:
+    """只看某个 collection 的存储请求 —— 协议数据会掺进来，别数错。"""
+    return [r for r in fake.requests if f"/storage/{collection}" in r.url.path]
 
 
 def bso(record_id: str) -> dict[str, Any]:
@@ -141,7 +154,22 @@ async def test_happy_path_stores_records(tmp_path: Path) -> None:
     assert report.database == str(tmp_path / "db.sqlite")
 
     engine = await open_database(tmp_path / "db.sqlite")
-    assert await SyncRecord.count() == 2
+    assert await SyncRecord.count().where(SyncRecord.collection == "history") == 2
+    del engine
+
+
+async def test_protocol_data_is_pulled_alongside(tmp_path: Path) -> None:
+    """``crypto/keys`` 是解密要用的 —— 拉 history 时顺带拉下来，不用单独跑一次。"""
+    fake = FakeSync()
+    fake.counts = {"history": 1}
+    fake.pages = [[bso("a")]]
+
+    report = await sync(tmp_path, fake)
+
+    assert report.protocol == {"crypto": 1}
+    engine = await open_database(tmp_path / "db.sqlite")
+    stored = await SyncRecord.select().where(SyncRecord.collection == "crypto")
+    assert [row["record_id"] for row in stored] == ["keys"]
     del engine
 
 

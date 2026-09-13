@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from piccolo.columns import BigInt, DoublePrecision, Text, Varchar
@@ -18,7 +18,13 @@ from piccolo.table import Table
 
 from ffinfo.storage import EncryptedBso
 
-__all__ = ["SyncRecord", "open_database", "replace_collection"]
+__all__ = [
+    "SyncRecord",
+    "load_records",
+    "open_database",
+    "replace_collection",
+    "replace_collections",
+]
 
 
 class SyncRecord(Table, tablename="sync_records"):
@@ -54,28 +60,52 @@ async def open_database(path: Path) -> SQLiteEngine:
     return engine
 
 
+async def replace_collections(
+    engine: SQLiteEngine, batches: Mapping[str, Sequence[EncryptedBso]]
+) -> dict[str, int]:
+    """**一次事务**里整体替换多个 collection，返回各自的落库条数。
+
+    为什么要一次事务：``history`` 写进去了、``crypto/keys`` 没写进去，
+    库就处于"有数据但解不开"的半截状态 —— 那比什么都没有更让人困惑。
+    """
+    _bind(engine)
+    async with engine.transaction():
+        stored: dict[str, int] = {}
+        for collection, records in batches.items():
+            await SyncRecord.delete().where(SyncRecord.collection == collection)
+            rows = [
+                SyncRecord(
+                    collection=collection,
+                    record_id=record.id,
+                    modified=record.modified,
+                    payload=record.payload,
+                    sortindex=record.sortindex,
+                    ttl=record.ttl,
+                )
+                for record in records
+            ]
+            if rows:
+                await SyncRecord.insert(*rows)
+            stored[collection] = len(rows)
+    return stored
+
+
 async def replace_collection(
     engine: SQLiteEngine, collection: str, records: Sequence[EncryptedBso]
 ) -> int:
-    """用这一批记录**整体替换**某个 collection，返回落库条数。
+    """用这一批记录整体替换**一个** collection，返回落库条数。
 
     全量拉取天然是"替换"语义，所以直接删了重插 —— 重跑一次 ``sync`` 不会翻倍，
     也不会留下上一轮已经被删掉的记录。
     """
+    stored = await replace_collections(engine, {collection: records})
+    return stored[collection]
+
+
+async def load_records(engine: SQLiteEngine, collection: str) -> list[tuple[str, str | None]]:
+    """读一个 collection 的 ``(record_id, payload)``。``payload`` 为 ``None`` 是墓碑。"""
     _bind(engine)
-    rows = [
-        SyncRecord(
-            collection=collection,
-            record_id=record.id,
-            modified=record.modified,
-            payload=record.payload,
-            sortindex=record.sortindex,
-            ttl=record.ttl,
-        )
-        for record in records
-    ]
-    async with engine.transaction():
-        await SyncRecord.delete().where(SyncRecord.collection == collection)
-        if rows:
-            await SyncRecord.insert(*rows)
-    return len(rows)
+    rows = await SyncRecord.select(SyncRecord.record_id, SyncRecord.payload).where(
+        SyncRecord.collection == collection
+    )
+    return [(str(row["record_id"]), row["payload"]) for row in rows]

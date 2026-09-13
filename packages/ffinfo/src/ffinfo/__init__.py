@@ -8,25 +8,36 @@
 
 from ffinfo.credentials import AgeIdentity, CredentialStore
 from ffinfo.crypto import EncryptedPayload, KeyBundle
-from ffinfo.errors import FfinfoError
+from ffinfo.errors import BackoffError, FfinfoError, SyncProtocolError
+from ffinfo.history import HistoryEntry, HistoryRecord, HistoryVisit, decrypt_history
 from ffinfo.keys import OLD_SYNC_SCOPE, CollectionKeys, ScopedKey, parse_scoped_keys
 from ffinfo.oauth import Credentials, OAuthClient, OAuthEndpoints, PkcePair
+from ffinfo.storage import CollectionFetch, EncryptedBso, SyncStorageClient
 
 __version__ = "0.1.0"
 
 __all__ = [
     "OLD_SYNC_SCOPE",
     "AgeIdentity",
+    "BackoffError",
+    "CollectionFetch",
     "CollectionKeys",
     "CredentialStore",
     "Credentials",
+    "EncryptedBso",
     "EncryptedPayload",
     "FfinfoError",
+    "HistoryEntry",
+    "HistoryRecord",
+    "HistoryVisit",
     "KeyBundle",
     "OAuthClient",
     "OAuthEndpoints",
     "PkcePair",
     "ScopedKey",
+    "SyncProtocolError",
+    "SyncStorageClient",
     "__version__",
+    "decrypt_history",
     "parse_scoped_keys",
 ]

@@ -9,6 +9,7 @@ import typer
 
 from ffinfo.errors import BackoffError, FfinfoError
 from ffinfo_cli import __version__
+from ffinfo_cli.list import list_blocking, parse_since
 from ffinfo_cli.login import login_sync
 from ffinfo_cli.paths import credentials_path, database_path, identity_path
 from ffinfo_cli.sync import sync_blocking
@@ -87,6 +88,37 @@ def sync(
         raise typer.Exit(code=1) from exc
     except FfinfoError as exc:
         typer.echo(f"同步失败：{exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(report.to_json())
+
+
+@app.command(name="list")
+def list_command(
+    since: str | None = typer.Option(
+        None,
+        "--since",
+        help="只看这个时间之后的（YYYY-MM-DD 或 ISO 8601；没写时区就按本机时区算）",
+    ),
+    domain: str | None = typer.Option(None, "--domain", "-d", help="只看这个域名（子域名也算）"),
+    search: str | None = typer.Option(
+        None, "--search", "-s", help="在 URL 和标题里搜（不区分大小写）"
+    ),
+    limit: int | None = typer.Option(None, "--limit", "-n", help="最多返回多少条，最新的优先"),
+) -> None:
+    """把库里的浏览历史解密后输出 JSON。纯本地，不联网。"""
+    try:
+        report = list_blocking(
+            identity_path=identity_path(),
+            credentials_path=credentials_path(),
+            database_path=database_path(),
+            since=parse_since(since) if since is not None else None,
+            domain=domain,
+            search=search,
+            limit=limit,
+        )
+    except FfinfoError as exc:
+        typer.echo(f"读取失败：{exc}", err=True)
         raise typer.Exit(code=1) from exc
 
     typer.echo(report.to_json())
