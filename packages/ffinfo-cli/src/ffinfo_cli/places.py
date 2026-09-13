@@ -1,4 +1,4 @@
-"""本地 Firefox profile 的定位（见 ``docs/design.md`` §3.9）。
+"""本地 Firefox profile 的定位（见 ``docs/design.md`` §3.8）。
 
 ``export`` 只在**有 Firefox 的机器**上跑，它的第一件事就是找到那个 profile 的
 ``places.sqlite``。三平台路径不同，而且**不能猜目录名**（形如 ``<8位随机>.default-release``）——

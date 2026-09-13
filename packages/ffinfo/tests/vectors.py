@@ -1,9 +1,10 @@
 """ffinfo 的测试向量 —— 全部有出处，**不由被测代码自己产生**。
 
-三条向量：
+四条向量：
 
 * :data:`AES` —— 官方 AES-256-CBC + HMAC-SHA256 记录向量，明文本身是一条历史记录。
 * :data:`SCOPED_KEY` —— 官方 scoped key 向量（OAuth 的产物，64 字节 = 同步 KeyBundle）。
+* :data:`JWE` —— 一条真实的 ``keys_jwe`` + 解开它的固定 P-256 私钥（出处同上一条）。
 * :data:`CRYPTO_KEYS` —— 本地生成的 ``crypto/keys`` 向量（上游没有现成的，生成方式见下）。
 
 任何"看起来对"的期望值都不许出现在这里。
@@ -110,14 +111,6 @@ JWE = JweVector(
     private_key_d_b64="UayD4kn_4QHvLvLLSSaANfDUp9AcQndQu_TohQKoyn8",
     expected_keys_json=SCOPED_KEY.payload_json,
 )
-# ⚠️ 上游**没有**现成的 crypto/keys 测试向量，所以这条是本地生成的：
-#   · 明文结构 = `sync15/src/record_types.rs` 的 CryptoKeysRecord +
-#     `syncstorage-rs/docs/src/sync-client/global-storage-v5.md` §crypto/keys
-#   · 根密钥与 IV = 向量 1 的官方密钥材料（key_bundle.rs）
-#   · 密文 / HMAC = 用 pyca/cryptography 独立实现生成（不经过 ffinfo）
-#   · default / history / bookmarks 的 bulk key = sha256("ffinfo vector: ...")，纯占位
-
-
 # ⚠️ 上游**没有**现成的 crypto/keys 测试向量，所以这条是本地生成的：
 #   · 明文结构 = `sync15/src/record_types.rs` 的 CryptoKeysRecord +
 #     `syncstorage-rs/docs/src/sync-client/global-storage-v5.md` §crypto/keys

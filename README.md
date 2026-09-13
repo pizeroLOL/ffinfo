@@ -75,7 +75,7 @@ uv run prek install                       # 装 git 钩子
 
 ## 文档
 
-- [`docs/design.md`](docs/design.md) —— **设计与决策归档，自包含**：19 条决策、每条技术事实
+- [`docs/design.md`](docs/design.md) —— **设计与决策归档，自包含**：20 条决策、每条技术事实
   都带源码出处。想接手这个项目，读它一份就够。
 - [`AGENTS.md`](AGENTS.md) —— 工作约定：开发命令、硬性约束、本地工单放在哪。
 - `docs/agents/` —— 一套**可选**的工单/领域文档约定，描述的是作者本地的协作流程。

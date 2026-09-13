@@ -1,6 +1,8 @@
 # ffinfo 设计归档
 
-> **状态**：设计完成，待开工
+> **状态**：设计归档 + 已落地 —— 两个包都能跑：CLI 六条命令（`login` / `sync` / `list` /
+> `export` / `import` / `profiles`）真机验证过，三平台 CI 全绿（2026-09-14）。
+> 本文档仍然自包含：**读这一份就能接手**。
 > **归档时间**：2026-09-13
 > **2026-09-14 补记**：包名调整 —— 库 `ffsync` → `ffinfo`；CLI 的 Python 模块 → `ffinfo_cli`
 > （PyPI 名仍是 `ffinfo-cli`，命令仍是 `ffinfo`）。下文已按新名字改写。
@@ -38,10 +40,10 @@
 | 1 | 用途：**个人复盘** | 不是取证、不是清理、不是数据管道 |
 | 2 | 数据源：**双源** | ① Firefox Sync（远程）② 本地 `places.sqlite` |
 | 3 | 本地源前提：**源机器必须有 Firefox** | 靠 `export`/`import` 搬运到目标机器 |
-| 4 | 数据范围：**历史 + 书签 + 标签页**（~~表单~~ ❌ 已证实拿不到，见 §3.8） | 表单移入 TODO |
+| 4 | 数据范围：**历史 + 书签 + 标签页**（~~表单~~ ❌ 已证实拿不到，见 §3.7） | 表单移入 TODO |
 | 5 | 边界：**严格只读** | 用 `#read` scope，不写回 Mozilla |
 | 6 | 输出：**纯数据** | 不做统计、不做 TUI（都进 TODO） |
-| 7 | 真正用户：**agent（skill）** | 会再写一个类似 `bf-stats` 的 AstrBot skill 调它 |
+| 7 | 真正用户：**agent（skill）** | 已有一个类似 `bf-stats` 的 AstrBot skill 调它（作者工作区 `skills/ffinfo/`） |
 
 > ⚠️ **决策 5 的实测修订（2026-09-14）**：原写「用 `#read` scope，严格只读」。
 > 实测：`…/oldsync#read` **不返回 `keys_jwe`** —— FxA 只给完整的 `…/oldsync` 派发密钥。
@@ -272,7 +274,7 @@ struct HistoryRecord {
 > 这里说的 A / B 是**本地**那个文件要不要读 —— 那是用户自己机器上的文件，来源清楚，
 > 将来想做还能做。
 
-### 3.9 本地源：places.sqlite 与 export/import（08 号，2026-09-14）
+### 3.8 本地源：places.sqlite 与 export/import（08 号，2026-09-14）
 
 **profile 定位不猜目录名**（形如 `<8位随机>.default-release`），走 Firefox 自己的
 `profiles.ini`，认它标的那个 `Default=1`；新版 Firefox 把"默认是哪个"记在
@@ -342,7 +344,7 @@ Firefox 跑着的时候库是 WAL 模式，**最近的访问还在 `places.sqlit
 
 ---
 
-### 3.8 生态现状
+### 3.9 生态现状
 
 | 事实 | 出处 |
 |---|---|
@@ -363,6 +365,7 @@ Firefox 跑着的时候库是 WAL 模式，**最近的访问还在 `places.sqlit
 | 2 | **`forms` collection 可能已死** | 数据范围里的"表单"拿不到 | `clients_engine` 对 forms 的 reset 返回 `Unsupported`，像遗留项。**需实测** |
 | 3 | **同步数据量远小于直觉** | 用户预期落差 | 已用"双源"解决 |
 | 4 | **Mozilla 无第三方 CLI 自助注册通道** | 项目无法"干净地"发布 | 同上，先本地自用 |
+| 5 | **access token 过期后只能人工重跑 `login`** | 与"无人值守"矛盾 —— 过期那一刻起，`sync` 只能报"重新登录" | 用凭据里已经存着的 `refresh_token` 自动续；刷新失败（`invalid_grant`）才提示重新 `login` |
 
 ---
 
@@ -379,15 +382,12 @@ Firefox 跑着的时候库是 WAL 模式，**最近的访问还在 `places.sqlit
 
 ## 6. 参考资料（本地）
 
-### 6.1 浅克隆仓库（`research/`，共 47M）
+### 6.1 上游仓库（浅克隆，按需）
 
-| 目录 | 分支 | 大小 | 里面有什么 |
-|---|---|---|---|
-| `research/application-services/` | `main`（稀疏） | 21M | `places/history_sync/mod.rs`（上限常数）、`sync15/src/key_bundle.rs`（64B 切法）、`sync15/src/client/collection_keys.rs`（collection 密钥）、`docs/design/sync-overview.md` |
-| `research/ecosystem-platform/` | `master` | 26M | `docs/explanation/scoped-keys.md`（★ 最关键）、`docs/reference/oauth-details.md`、`docs/relying-parties/reference/integration-requirements.md` |
-| `research/syncclient/` | `master` | 240K | 已废弃的官方 Python 客户端（**老协议，仅供参考，不可照抄**） |
+调研时浅克隆过三个仓库（共 47M）。它们**不在版本控制里** —— 别人 clone 下来没有是正常的，
+§3 的每条事实都写清了上游出处（仓库 + 文件路径），不依赖本地副本就能核对。
+要复现这份副本：
 
-克隆命令（复现用）：
 ```bash
 git clone --depth 1 --branch master --single-branch https://github.com/mozilla/ecosystem-platform.git
 git clone --depth 1 --branch master --single-branch https://github.com/mozilla-services/syncclient.git
@@ -395,7 +395,13 @@ git clone --depth 1 --branch main --single-branch --filter=blob:none --sparse ht
 cd application-services && git sparse-checkout set components/places components/sync15 components/fxa-client components/support docs
 ```
 
-### 6.2 调研输出
+| 仓库 | 里面有什么 |
+|---|---|
+| `mozilla/application-services` | `places/history_sync/mod.rs`（上限常数）、`sync15/src/key_bundle.rs`（64B 切法）、`sync15/src/client/collection_keys.rs`（collection 密钥）、`docs/design/sync-overview.md` |
+| `mozilla/ecosystem-platform` | `docs/explanation/scoped-keys.md`（★ 最关键）、`docs/reference/oauth-details.md`、`docs/relying-parties/reference/integration-requirements.md` |
+| `mozilla-services/syncclient` | 已废弃的官方 Python 客户端（**老协议，仅供参考，不可照抄**） |
+
+### 6.2 调研输出（作者本机）
 
 | 文件 | 内容 |
 |---|---|
@@ -404,9 +410,10 @@ cd application-services && git sparse-checkout set components/places components/
 | `/tmp/ffsync_research3.txt` | 第三轮：上限常数、密钥派生、记录结构 |
 | `tools/_research_ffsync*.py` | 调研脚本源码（可重跑） |
 
-> ⚠️ `/tmp` 下的文件**重启会丢**。重要的结论已全部转写到本文档 §3。
+> 这些是过程材料，**不在版本控制里**；`/tmp` 下的**重启会丢**。
+> 重要的结论已全部转写到本文档 §3 —— 丢了也不影响接手。
 
-### 6.3 上一版的代码骨架
+### 6.3 上一版的代码骨架（作者本机）
 
 | 路径 | 状态 |
 |---|---|
@@ -415,7 +422,10 @@ cd application-services && git sparse-checkout set components/places components/
 
 ---
 
-## 7. 下一步（开工顺序）
+## 7. 开工顺序（已走完）
+
+> **① ② ③ 都已落地（2026-09-14）** —— 库 + CLI 真机验证过，AstrBot skill 在作者工作区的
+> `skills/ffinfo/`（不在本仓库）。下面是当初定的路线，留作记录。
 
 ```
 ① ffinfo 核心库
@@ -434,16 +444,17 @@ cd application-services && git sparse-checkout set components/places components/
 ```
 
 **测试策略**：逻辑全 TDD + 官方测试向量；网络层只做少量集成测试。
-**验收标准**：`ffinfo-cli sync` 能从真实账号拉到数据并解密成功，`ffinfo-cli list` 输出可被 agent 消费
-（`list` 恒输出 JSON，没有 `--json` 这个开关 —— 见 `README.md` 的退出码与错误契约）。
+**验收标准（已达成）**：`ffinfo-cli sync` 能从真实账号拉到数据并解密成功，
+`ffinfo-cli list` 输出可被 agent 消费（`list` 恒输出 JSON，没有 `--json` 这个开关 ——
+见 `README.md` 的退出码与错误契约）。
 
 ---
 
-## 8. 仍未拍板
+## 8. 拍板记录（原「仍未拍板」）
 
-| # | 问题 | 待定 |
+| # | 问题 | 结论 |
 |---|---|---|
-| A | 如果 `forms` 确认已死 —— 降级跳过，还是另想办法？ | ❓ |
-| B | `research/` 的 47M 克隆 —— 开工后保留还是删除？ | ❓ |
+| A | 如果 `forms` 确认已死 —— 降级跳过，还是另想办法？ | ✅ **已定案（见 §3.7）**：云端 `forms` 一条都不拉（白名单挡着）；本地 `formhistory.sqlite` 留作将来的单边通道 |
+| B | `research/` 的 47M 克隆 —— 开工后保留还是删除？ | ✅ **已定案（2026-09-14）**：浅克隆只留在作者本机、不进版本控制；§6.1 改成上游链接 + 复现命令，文档不再依赖本地副本 |
 | C | **pyright 修法** | ✅ **已拍板（2026-09-14）**：**先豁免** unknown 系列（`reportUnknown*` + `reportAttributeAccessIssue`），把"自己写的类型"这层检查保住；`include` 的通配已修，检查器真的在跑（52 个文件 / 0 errors）。补依赖存根（pyrage / piccolo）记进待办，补完把豁免开回来 |
-| D | Python 版本策略：现在 `requires-python = ">=3.14"` 且真用了 PEP 758。库的卖点是「官方客户端归档后市面唯一替代品」—— 锁死在 3.14 等于掐死卖点；放宽要改写那处语法 | ❓ |
+| D | Python 版本策略：现在 `requires-python = ">=3.14"` 且真用了 PEP 758。库的卖点是「官方客户端归档后市面唯一替代品」—— 锁死在 3.14 等于掐死卖点；放宽要改写那处语法 | ✅ **已拍板（2026-09-14）：保持 3.14 不动** —— `uv sync` 会自己把解释器拉下来，"锁死 3.14"不构成使用门槛。将来真要放宽，再改写那处语法 |
