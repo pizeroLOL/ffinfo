@@ -116,6 +116,7 @@ async def build_report(
     platform: str,
     env: Mapping[str, str],
     paths: LocalPaths,
+    warn: Callable[[str], None] | None = None,
     clock: Callable[[], float] = time.time,
 ) -> ProfilesReport:
     """把本地状态凑成一份报告。
@@ -132,7 +133,7 @@ async def build_report(
     db_note: str | None = None
     if paths.database.is_file():
         try:
-            store = await open_database(paths.database)
+            store = await open_database(paths.database, warn=warn)
             collections = [
                 CollectionProgress(
                     collection=cursor.collection,
@@ -198,6 +199,7 @@ def profiles_blocking(
     platform: str,
     env: Mapping[str, str],
     paths: LocalPaths | None = None,
+    warn: Callable[[str], None] | None = None,
     clock: Callable[[], float] = time.time,
 ) -> ProfilesReport:
     """:func:`build_report` 的同步外壳。"""
@@ -207,6 +209,7 @@ def profiles_blocking(
             platform=platform,
             env=env,
             paths=paths if paths is not None else default_paths(),
+            warn=warn,
             clock=clock,
         )
     )

@@ -145,7 +145,9 @@ class OAuthTokens(BaseModel):
     access_token: str
     token_type: str = "bearer"
     scope: str = ""
-    expires_in: int = 0
+    expires_in: int | None = None
+    """token 还能用多少秒。**缺字段是 ``None``，不是 0** —— 混成同一个值的话，
+    "服务器没给"和"一出生就过期"就分不出来了。"""
     refresh_token: str | None = None
     keys_jwe: str | None = None
 
@@ -323,6 +325,13 @@ class Credentials(BaseModel):
 
         ``now`` 由调用者给 —— 库不自己去读时钟。
         """
+        if tokens.expires_in is None:
+            msg = (
+                "token 响应里没有 expires_in —— 没法知道这份凭据能用多久"
+                "（不敢存一个「一出生就过期」的凭据）。重新跑一次 `ffinfo-cli login`；"
+                "如果还这样，那就是服务器变了。"
+            )
+            raise AuthError(msg)
         return cls(
             access_token=tokens.access_token,
             refresh_token=tokens.refresh_token,

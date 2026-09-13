@@ -117,6 +117,39 @@ async def test_export_carries_the_cloud_records_and_cursors(tmp_path: Path) -> N
     assert portable.cursors[0].last_modified == 42.5
 
 
+async def test_export_does_not_touch_the_local_database(tmp_path: Path) -> None:
+    """export 是"读出来带走"：老库里的重复行不该被它收敛，索引也不该被它补上。"""
+    home = tmp_path / "home"
+    profile_with_firefox(home, [("https://a.example/", "A", micros(DAY), 1)])
+    database = tmp_path / "legacy.sqlite"
+    store = await open_database(database)
+    await store.store_batches(
+        [CollectionBatch(collection="history", records=[record("a")], full=True)],
+    )
+    connection = sqlite3.connect(database)
+    connection.execute("DROP INDEX ux_sync_records_collection_record_id")
+    connection.execute(
+        "INSERT INTO sync_records (collection, record_id, modified, payload) "
+        "VALUES ('history', 'a', 99.0, 'duplicate')"
+    )
+    connection.commit()
+    connection.close()
+
+    await export_from(home, tmp_path / "portable.sqlite", database=database)
+
+    connection = sqlite3.connect(database)
+    duplicated = connection.execute(
+        "SELECT COUNT(*) FROM sync_records WHERE collection = 'history' AND record_id = 'a'"
+    ).fetchone()
+    indexes = connection.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' "
+        "AND name = 'ux_sync_records_collection_record_id'"
+    ).fetchone()
+    connection.close()
+    assert duplicated == (2,)  # 重复行原样留着 —— 收敛是开库命令的事，不是 export 的
+    assert indexes == (0,)
+
+
 async def test_export_works_without_any_local_database(tmp_path: Path) -> None:
     """只装过 Firefox、还没 login/sync 的机器也要能 export。"""
     home = tmp_path / "home"

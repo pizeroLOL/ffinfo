@@ -764,6 +764,23 @@ async def test_bookmark_cycles_reach_the_report_as_skipped(tmp_path: Path) -> No
     assert report.skipped == 2
 
 
+async def test_deep_bookmark_trees_do_not_blow_the_stack(tmp_path: Path) -> None:
+    """病态深树：剪枝 / 拍平也是迭代版，不炸栈（库那边 ``_walk`` 已有同一条防线）。"""
+    depth = 1_200
+    records = [bookmark_record("n0", parent_id=None, kind="folder", title="根", url=None)]
+    records += [
+        bookmark_record(f"n{i}", parent_id=f"n{i - 1}", kind="folder", title=f"n{i}", url=None)
+        for i in range(1, depth)
+    ]
+    records.append(bookmark_record("leaf", parent_id=f"n{depth - 1}", title="底"))
+    await build_db(tmp_path, [], bookmarks=records)
+
+    report = await run(tmp_path, data_type="bookmarks")
+
+    assert report.counts == {"folder": depth, "bookmark": 1}
+    assert report.returned == 1
+
+
 async def test_bookmark_json_is_serializable_with_iso_times(tmp_path: Path) -> None:
     """时间字段在模型里是 ``datetime``，出去必须是 ISO 字符串 —— JSON 里形状不变。"""
     await build_db(

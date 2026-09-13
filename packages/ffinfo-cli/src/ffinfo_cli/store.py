@@ -20,8 +20,7 @@
 
 from __future__ import annotations
 
-import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -223,6 +222,8 @@ class Store:
 
         if fresh:
             await SyncRecord.insert(*fresh)
+        # 逐行 UPDATE 是有意的取舍：增量里真正"变了的"通常是个位数，一条条写最直白；
+        # 拼一条 CASE 批量得先证明它值得 —— 现在不值。
         for row_id, record in updates:
             await SyncRecord.update(
                 {
@@ -513,28 +514,44 @@ def _bind(engine: SQLiteEngine) -> None:
         table._meta.db = engine  # pyright: ignore[reportPrivateUsage]
 
 
-async def open_database(path: Path) -> Store:
-    """打开本地库，表不存在就建，返回 :class:`Store`。**不建默认路径** —— 路径由调用者给。"""
+async def open_database(
+    path: Path,
+    *,
+    read_only: bool = False,
+    warn: Callable[[str], None] | None = None,
+) -> Store:
+    """打开本地库，表不存在就建，返回 :class:`Store`。**不建默认路径** —— 路径由调用者给。
+
+    ``read_only=True``：**只读打开** —— 不建表、不做重复行收敛。"把数据读出来带走"的
+    命令（``export``）不该改本地状态。
+
+    ``warn``：收敛老库里的重复行时往哪儿说。**不注入就没人知道** —— 删除数据这种事
+    必须有个去处，命令行那层接的是 stderr。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     engine = SQLiteEngine(path=str(path))
     _bind(engine)
+    if read_only:
+        return Store(engine)
     await SyncRecord.create_table(if_not_exists=True)
     await SyncCursor.create_table(if_not_exists=True)
     await LocalVisitRow.create_table(if_not_exists=True)
-    await _enforce_record_identity(engine)
+    await _enforce_record_identity(engine, warn)
     return Store(engine)
 
 
 _RECORD_IDENTITY_INDEX: Final = "ux_sync_records_collection_record_id"
 
 
-async def _enforce_record_identity(engine: SQLiteEngine) -> None:
+async def _enforce_record_identity(
+    engine: SQLiteEngine, warn: Callable[[str], None] | None
+) -> None:
     """让 ``(collection, record_id)`` 真的唯一 —— "库里有行 ⇔ 记录存在"的底座。
 
     建过就不再动（检查只是一次 ``sqlite_master`` 查询，很便宜）。老库里如果躺着重复行
     （早期版本同一批里同 id 出现两次会插出两行），先收敛：每个
     ``(collection, record_id)`` 只保留 ``modified`` 最新的一条，同值留行号大的。
-    **收敛不是悄悄干的** —— 删了几条要报给用户（stderr，人看的通道）。
+    **收敛不是悄悄干的** —— 删了几条报给 ``warn``（命令行那层接 stderr）。
     """
     existing = await SyncRecord.raw(
         "SELECT name FROM sqlite_master WHERE type = 'index' AND name = {}",
@@ -550,11 +567,10 @@ async def _enforce_record_identity(engine: SQLiteEngine) -> None:
         ") WHERE rank > 1"
     )
     folded = int(duplicates[0]["folded"]) if duplicates else 0
-    if folded:
-        print(
-            f"警告：本地库里有 {folded} 条重复记录（同一个 collection + 同 id）—— "
-            f"已收敛，每个 id 只保留 modified 最新的一条。",
-            file=sys.stderr,
+    if folded and warn is not None:
+        warn(
+            f"本地库里有 {folded} 条重复记录（同一个 collection + 同 id）—— "
+            f"已收敛，每个 id 只保留 modified 最新的一条。"
         )
     await SyncRecord.raw(
         "DELETE FROM sync_records WHERE id IN ("

@@ -191,6 +191,7 @@ async def run_list(
     domain: str | None = None,
     search: str | None = None,
     limit: int | None = None,
+    warn: Callable[[str], None] | None = None,
     clock: Callable[[], float] = time.time,
 ) -> ListReport:
     """读库 → 解密 → 过滤 → 出报告。全程不联网。"""
@@ -200,7 +201,7 @@ async def run_list(
         raise ConfigurationError(msg)
 
     credentials = load_credentials(identity_path=identity_path, credentials_path=credentials_path)
-    store = await open_database(database_path)
+    store = await open_database(database_path, warn=warn)
     key = await _collection_key(store, credentials.sync_key_bundle(), data_type)
     records = await store.load_records(data_type)
     # 本地源只有历史这一种 —— 书签与标签页是云端独有
@@ -510,21 +511,40 @@ def _truncate(entries: list[Any], limit: int | None) -> list[Any]:
 def _prune(
     nodes: Sequence[BookmarkNode], keep: Callable[[BookmarkNode], bool]
 ) -> list[BookmarkNode]:
-    """递归剪枝：文件夹只要有**任意一个后代**留下就保留。"""
+    """剪枝：文件夹只要有**任意一个后代**留下就保留。
+
+    **迭代版**（显式栈走后序）—— 病态深树不炸栈，与 ``bookmarks._walk`` 是同一条防线。
+    """
+    pruned: dict[int, list[BookmarkNode]] = {}
+    stack: list[tuple[BookmarkNode, bool]] = [(node, False) for node in reversed(list(nodes))]
+    while stack:
+        node, expanded = stack.pop()
+        if not expanded:
+            stack.append((node, True))
+            stack.extend((child, False) for child in reversed(node.children))
+            continue
+        children: list[BookmarkNode] = []
+        for child in node.children:
+            children.extend(pruned.pop(id(child), ()))
+        if children or (keep(node) and node.type != "folder"):
+            pruned[id(node)] = [node.model_copy(update={"children": children})]
+        else:
+            pruned[id(node)] = []
+
     kept: list[BookmarkNode] = []
     for node in nodes:
-        children = _prune(node.children, keep)
-        if children or (keep(node) and node.type != "folder"):
-            kept.append(node.model_copy(update={"children": children}))
+        kept.extend(pruned.pop(id(node), ()))
     return kept
 
 
 def _flatten(nodes: Sequence[BookmarkNode]) -> list[BookmarkNode]:
-    """深度优先拍平 —— 只用来数数和截断，输出仍然是树。"""
+    """深度优先拍平 —— 只用来数数和截断，输出仍然是树。**迭代版**，不炸栈。"""
     out: list[BookmarkNode] = []
-    for node in nodes:
+    stack = list(reversed(nodes))
+    while stack:
+        node = stack.pop()
         out.append(node)
-        out.extend(_flatten(node.children))
+        stack.extend(reversed(node.children))
     return out
 
 
@@ -564,6 +584,7 @@ def list_blocking(
     domain: str | None = None,
     search: str | None = None,
     limit: int | None = None,
+    warn: Callable[[str], None] | None = None,
 ) -> ListReport:
     """:func:`run_list` 的同步外壳。纯本地，所以没有 HTTP 客户端要开。"""
     return asyncio.run(
@@ -575,6 +596,7 @@ def list_blocking(
             since=since,
             domain=domain,
             search=search,
+            warn=warn,
             limit=limit,
         )
     )

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -93,6 +94,47 @@ def test_missing_credentials_is_configuration_exit_3(
     error = json.loads(result.stderr)["error"]
     assert error["code"] == "configuration"
     assert "私钥" in error["message"] or "凭据" in error["message"]
+
+
+def test_convergence_warning_reaches_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """老库收敛不是悄悄干的：命令行那层把它接到 stderr（这不是失败，退出码照旧 0）。"""
+    for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA"):
+        monkeypatch.setenv(name, str(tmp_path))
+    database = tmp_path / "ffinfo-cli" / "ffinfo.sqlite"
+    database.parent.mkdir(parents=True)
+    connection = sqlite3.connect(database)
+    connection.executescript(
+        """
+        CREATE TABLE sync_records (
+            id INTEGER PRIMARY KEY,
+            collection VARCHAR(64) NOT NULL,
+            record_id VARCHAR(64) NOT NULL,
+            modified DOUBLE PRECISION NOT NULL,
+            payload TEXT,
+            sortindex BIGINT,
+            ttl BIGINT
+        );
+        CREATE TABLE sync_cursors (
+            id INTEGER PRIMARY KEY,
+            collection VARCHAR(64) NOT NULL,
+            last_modified DOUBLE PRECISION NOT NULL,
+            synced_at DOUBLE PRECISION NOT NULL,
+            records INTEGER NOT NULL
+        );
+        INSERT INTO sync_records (collection, record_id, modified, payload) VALUES
+            ('history', 'a', 1.0, 'old'),
+            ('history', 'a', 2.0, 'new');
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    result = runner.invoke(app, ["profiles"])
+
+    assert result.exit_code == 0
+    assert "1 条重复记录" in result.stderr
 
 
 def test_login_without_oldsync_keys_is_auth_exit_4(monkeypatch: pytest.MonkeyPatch) -> None:

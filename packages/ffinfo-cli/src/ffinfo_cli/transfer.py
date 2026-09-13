@@ -164,6 +164,7 @@ async def run_import(
     *,
     database_path: Path,
     source: Path,
+    warn: Callable[[str], None] | None = None,
     clock: Callable[[], float] = time.time,
 ) -> ImportReport:
     """在**目标机器**上跑：把便携文件并进本地库。
@@ -179,7 +180,7 @@ async def run_import(
     """
     started = clock()
     portable = read_portable(source)
-    store = await open_database(database_path)
+    store = await open_database(database_path, warn=warn)
 
     visits = await store.store_local_visits(
         [
@@ -215,10 +216,13 @@ async def run_import(
 async def _cloud_state(
     database_path: Path,
 ) -> tuple[tuple[PortableRecord, ...], tuple[PortableCursor, ...]]:
-    """把本地库里的云端状态读出来。库还不存在（没 login / sync 过）就返回空的。"""
+    """把本地库里的云端状态读出来。库还不存在（没 login / sync 过）就返回空的。
+
+    **只读打开** —— "读出来带走"的命令不该顺手建表、更不该顺手收敛重复行。
+    """
     if not database_path.is_file():
         return (), ()
-    store = await open_database(database_path)
+    store = await open_database(database_path, read_only=True)
     records = await store.load_all_records()
     cursors = await store.load_all_cursors()
     return records, cursors
@@ -248,6 +252,8 @@ def export_blocking(
     )
 
 
-def import_blocking(*, database_path: Path, source: Path) -> ImportReport:
+def import_blocking(
+    *, database_path: Path, source: Path, warn: Callable[[str], None] | None = None
+) -> ImportReport:
     """:func:`run_import` 的同步外壳。"""
-    return asyncio.run(run_import(database_path=database_path, source=source))
+    return asyncio.run(run_import(database_path=database_path, source=source, warn=warn))

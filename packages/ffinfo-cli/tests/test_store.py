@@ -221,9 +221,7 @@ async def test_record_identity_is_enforced_by_the_database(tmp_path: Path) -> No
         )
 
 
-async def test_old_databases_with_duplicate_rows_are_repaired(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+async def test_old_databases_with_duplicate_rows_are_repaired(tmp_path: Path) -> None:
     """早期版本写出来的库里可能躺着重复行 —— 开库时收敛，**并且喊一声**。"""
     path = tmp_path / "old.sqlite"
     connection = sqlite3.connect(path)
@@ -246,27 +244,63 @@ async def test_old_databases_with_duplicate_rows_are_repaired(
     )
     connection.commit()
     connection.close()
+    warnings: list[str] = []
 
-    await open_database(path)
+    await open_database(path, warn=warnings.append)
 
     rows = await SyncRecord.select().order_by(SyncRecord.id)
     assert [(row["collection"], row["record_id"], row["payload"]) for row in rows] == [
         ("history", "a", "new"),
         ("bookmarks", "a", "other"),
     ]
-    assert "1 条重复记录" in capsys.readouterr().err
+    assert len(warnings) == 1
+    assert "1 条重复记录" in warnings[0]
 
 
-async def test_clean_databases_do_not_warn(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+async def test_read_only_open_leaves_a_legacy_database_alone(tmp_path: Path) -> None:
+    """``read_only=True``：不建表、不收敛 —— 库里原来什么样，打开后还是什么样。"""
+    path = tmp_path / "old.sqlite"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE sync_records (
+            id INTEGER PRIMARY KEY,
+            collection VARCHAR(64) NOT NULL,
+            record_id VARCHAR(64) NOT NULL,
+            modified DOUBLE PRECISION NOT NULL,
+            payload TEXT,
+            sortindex BIGINT,
+            ttl BIGINT
+        );
+        INSERT INTO sync_records (collection, record_id, modified, payload) VALUES
+            ('history', 'a', 1.0, 'old'),
+            ('history', 'a', 5.0, 'new');
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    await open_database(path, read_only=True)
+
+    connection = sqlite3.connect(path)
+    tables = connection.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+    ).fetchall()
+    rows = connection.execute("SELECT payload FROM sync_records ORDER BY id").fetchall()
+    connection.close()
+    assert tables == [("sync_records",)]  # 没顺手建出 sync_cursors / local_visits
+    assert [row[0] for row in rows] == ["old", "new"]  # 也没顺手收敛
+
+
+async def test_clean_databases_do_not_warn(tmp_path: Path) -> None:
     """没重复就别吓人 —— 建过索引之后也不会再查。"""
     path = tmp_path / "db.sqlite"
+    warnings: list[str] = []
 
-    await open_database(path)
-    await open_database(path)
+    await open_database(path, warn=warnings.append)
+    await open_database(path, warn=warnings.append)
 
-    assert capsys.readouterr().err == ""
+    assert warnings == []
 
 
 class _FailsMidway:

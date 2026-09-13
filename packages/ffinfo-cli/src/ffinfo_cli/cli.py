@@ -82,6 +82,11 @@ def _emit_error(payload: dict[str, Any]) -> None:
     typer.echo(json.dumps(payload, ensure_ascii=False), err=True)
 
 
+def _warn(message: str) -> None:
+    """警告走 stderr：**不是失败**（退出码照旧），但人得看得见 —— 比如老库收敛了重复行。"""
+    typer.echo(f"警告：{message}", err=True)
+
+
 def _fail(exc: FfinfoError, *, note: str = "") -> NoReturn:
     """失败也机器可读：分档退出码 + stderr 上的错误 JSON。"""
     code, payload = error_payload(exc)
@@ -193,6 +198,7 @@ def sync(
                 page_size=page_size,
                 full=full,
                 on_progress=reporter,
+                warn=_warn,
             ),
             backoff_note="。库里没动任何东西。",
         )
@@ -243,6 +249,7 @@ def list_command(
             domain=domain,
             search=search,
             limit=limit,
+            warn=_warn,
         )
     )
 
@@ -278,7 +285,9 @@ def import_command(
     source: Path = _SOURCE,
 ) -> None:
     """在**目标机器**上跑：把便携文件并进本地库，查询时与云端数据合并。"""
-    report = _guard(lambda: import_blocking(database_path=database_path(), source=source))
+    report = _guard(
+        lambda: import_blocking(database_path=database_path(), source=source, warn=_warn)
+    )
 
     typer.echo(report.to_json())
     for warning in report.warnings:
@@ -289,7 +298,9 @@ def import_command(
 def profiles() -> None:
     """查看本地状态：探测到的 Firefox profile、目录、密钥、上次同步时间。"""
     report = _guard(
-        lambda: profiles_blocking(home=Path.home(), platform=sys.platform, env=os.environ)
+        lambda: profiles_blocking(
+            home=Path.home(), platform=sys.platform, env=os.environ, warn=_warn
+        )
     )
 
     typer.echo(report.to_json())

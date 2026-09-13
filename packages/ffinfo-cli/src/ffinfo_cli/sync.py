@@ -102,6 +102,7 @@ async def run_sync(
     collection: str,
     http: httpx.AsyncClient,
     on_progress: Callable[[FetchProgress], None] | None = None,
+    warn: Callable[[str], None] | None = None,
     page_size: int = 100,
     full: bool = False,
     clock: Callable[[], float] = time.time,
@@ -138,7 +139,7 @@ async def run_sync(
     )
 
     started = clock()
-    store = await open_database(database_path)
+    store = await open_database(database_path, warn=warn)
     targets = (collection, *_PROTOCOL_COLLECTIONS)
 
     cursors: dict[str, float | None] = {}
@@ -193,6 +194,7 @@ def sync_blocking(
     page_size: int = 100,
     full: bool = False,
     on_progress: Callable[[FetchProgress], None] | None = None,
+    warn: Callable[[str], None] | None = None,
 ) -> SyncReport:
     """:func:`run_sync` 的同步外壳：自己开 HTTP 客户端。
 
@@ -210,6 +212,7 @@ def sync_blocking(
                 page_size=page_size,
                 full=full,
                 on_progress=on_progress,
+                warn=warn,
             )
 
     return asyncio.run(_main())

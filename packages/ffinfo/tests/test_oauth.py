@@ -331,6 +331,16 @@ def test_credentials_survive_a_json_round_trip() -> None:
     assert restored.access_token == original.access_token
 
 
+def test_missing_expires_in_is_actionable_not_born_expired() -> None:
+    """缺 ``expires_in`` ≠ 有效期为 0 —— 前者要当场说清楚，别让凭据"一出生就过期"。"""
+    tokens = OAuthTokens(access_token="ACCESS-TOKEN")
+
+    with pytest.raises(AuthError) as caught:
+        Credentials.from_tokens(tokens, _official_key_pair(), now=1_000.0)
+
+    assert "expires_in" in str(caught.value)
+
+
 def test_credentials_expiry_uses_the_injected_clock() -> None:
     credentials = _credentials(now=1_000.0)
 
