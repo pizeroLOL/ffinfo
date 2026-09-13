@@ -26,8 +26,8 @@ from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from ffsync._encoding import key_b64, key_b64url, record_b64, record_hex
-from ffsync.errors import ConfigurationError, DecryptionError, KeyDerivationError
+from ffinfo._encoding import key_b64, key_b64url, record_b64, record_hex
+from ffinfo.errors import ConfigurationError, DecryptionError, KeyDerivationError
 
 __all__ = ["EncryptedPayload", "KeyBundle"]
 
@@ -94,7 +94,7 @@ class KeyBundle:
     def decrypt(self, ciphertext_b64: str, iv_b64: str, hmac_hex: str) -> str:
         """校验 HMAC 后解密，返回明文。
 
-        HMAC 不过就**绝不**解密 —— 任何异常都收敛成 :class:`~ffsync.errors.DecryptionError`。
+        HMAC 不过就**绝不**解密 —— 任何异常都收敛成 :class:`~ffinfo.errors.DecryptionError`。
         """
         ciphertext = record_b64(ciphertext_b64, "ciphertext")
         iv = record_b64(iv_b64, "IV")

@@ -9,7 +9,7 @@
 
 | 包 | 职责 |
 | --- | --- |
-| `packages/ffsync` | 纯 Python Firefox Sync 客户端库：OAuth · 密钥派生 · 记录解密 · 存储协议 |
+| `packages/ffinfo` | 纯 Python Firefox Sync 客户端库：OAuth · 密钥派生 · 记录解密 · 存储协议 |
 | `packages/ffinfo-cli` | CLI：本地 SQLite · 双源合并 · export/import · JSON 输出 |
 
 **完整设计与决策见 [`docs/design.md`](docs/design.md)** —— 开工前先读它。
@@ -32,7 +32,7 @@ uv run pre-commit install
 
 ## 硬性约束
 
-- **库不持有任何默认路径。** `ffsync` 的所有 I/O 位置由调用者注入，构造函数不设默认参数；默认路径只在 CLI 层决定。
+- **库不持有任何默认路径。** `ffinfo` 的所有 I/O 位置由调用者注入，构造函数不设默认参数；默认路径只在 CLI 层决定。
 - **密码永不进 CLI。** 认证走 OAuth + PKCE + `keys_jwk`，密码只在 `accounts.firefox.com` 的网页里输入。
 - **严格只读。** 用 `#read` scope，不写回 Mozilla 服务器。
 

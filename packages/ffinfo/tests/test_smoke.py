@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-import ffsync
-from ffsync import FfsyncError
-from ffsync.errors import (
+import ffinfo
+from ffinfo import FfinfoError
+from ffinfo.errors import (
     AuthError,
     ConfigurationError,
     DecryptionError,
@@ -16,7 +16,7 @@ from ffsync.errors import (
 
 
 def test_version_exposed() -> None:
-    assert ffsync.__version__ == "0.1.0"
+    assert ffinfo.__version__ == "0.1.0"
 
 
 @pytest.mark.parametrize(
@@ -24,4 +24,4 @@ def test_version_exposed() -> None:
     [AuthError, ConfigurationError, DecryptionError, KeyDerivationError, SyncProtocolError],
 )
 def test_all_errors_inherit_from_base(exc: type[Exception]) -> None:
-    assert issubclass(exc, FfsyncError)
+    assert issubclass(exc, FfinfoError)

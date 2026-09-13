@@ -7,11 +7,11 @@
 ## 命令
 
 ```bash
-ffinfo sync                 # 从 Firefox Sync 拉取（显式触发）
-ffinfo export <path>        # 在【有 Firefox 的机器】上导出本地 places.sqlite
-ffinfo import <path>        # 在【目标机器】上导入
-ffinfo list --json          # 查询，输出 JSON
-ffinfo profiles             # 查看状态
+ffinfo_cli sync                 # 从 Firefox Sync 拉取（显式触发）
+ffinfo_cli export <path>        # 在【有 Firefox 的机器】上导出本地 places.sqlite
+ffinfo_cli import <path>        # 在【目标机器】上导入
+ffinfo_cli list --json          # 查询，输出 JSON
+ffinfo_cli profiles             # 查看状态
 ```
 
 ## 数据源（双源）

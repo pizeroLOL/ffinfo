@@ -1,6 +1,6 @@
 """默认位置 —— **只有 CLI 层才决定路径**。
 
-库（``ffsync``）不持有任何默认值，所有 I/O 位置由调用者注入；
+库（``ffinfo``）不持有任何默认值，所有 I/O 位置由调用者注入；
 默认位置在这里定，见 ``docs/design.md`` §2.5。
 """
 
@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Final
 
-_APP: Final = "ffinfo"
+_APP: Final = "ffinfo_cli"
 
 
 def config_dir() -> Path:

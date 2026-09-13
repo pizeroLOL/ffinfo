@@ -2,6 +2,8 @@
 
 > **状态**：设计完成，待开工
 > **归档时间**：2026-09-13
+> **2026-09-14 补记**：包名调整 —— 库 `ffsync` → `ffinfo`；CLI 的 Python 模块 → `ffinfo_cli`
+> （PyPI 名仍是 `ffinfo-cli`，命令仍是 `ffinfo`）。下文已按新名字改写。
 > **来源**：6 轮 grilling 拷问 + 3 轮源码调研 + 3 个浅克隆仓库
 > **用途**：自包含参考文档 —— 未来任何会话（人或 agent）读这一份就能接手
 
@@ -17,10 +19,10 @@
 
 | | repo | 职责 | 依赖 |
 |---|---|---|---|
-| **A** | `ffsync` | 纯 Python Firefox Sync 客户端库：OAuth 认证 · 密钥派生 · 记录解密 · 存储协议 | — |
-| **B** | `pizero-firefox-info-cli`（PyPI: `ffinfo-cli`） | CLI · 本地 SQLite · 双源合并 · `export`/`import` | → `ffsync` |
+| **A** | `ffinfo` | 纯 Python Firefox Sync 客户端库：OAuth 认证 · 密钥派生 · 记录解密 · 存储协议 | — |
+| **B** | `pizero-firefox-info-cli`（PyPI: `ffinfo-cli`） | CLI · 本地 SQLite · 双源合并 · `export`/`import` | → `ffinfo` |
 
-**为什么这样切**：官方那个 Python Sync 客户端（`mozilla-services/syncclient`）**2019 年就归档了**，至今没有任何替代品。`ffsync` 单独成库本身就是市面上的稀缺品。
+**为什么这样切**：官方那个 Python Sync 客户端（`mozilla-services/syncclient`）**2019 年就归档了**，至今没有任何替代品。`ffinfo` 单独成库本身就是市面上的稀缺品。
 
 ---
 
@@ -70,7 +72,7 @@
 > **库不持有任何默认路径，所有 I/O 位置由调用者注入；CLI 决定默认位置。**
 
 ```python
-# ffsync —— 无默认值，必须显式传（构造函数不设默认参数）
+# ffinfo —— 无默认值，必须显式传（构造函数不设默认参数）
 client = SyncClient(credentials_path=..., keys_path=..., cache_dir=...)
 
 # ffinfo-cli —— 在这里决定默认
@@ -285,7 +287,7 @@ cd application-services && git sparse-checkout set components/places components/
 ## 7. 下一步（开工顺序）
 
 ```
-① ffsync 核心库
+① ffinfo 核心库
    ├── OAuth + PKCE + keys_jwk 流程
    ├── 密钥派生链（§3.2）★ 必须用官方测试向量
    ├── Sync 存储协议客户端（分页 / 增量 / backoff）

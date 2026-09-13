@@ -21,7 +21,7 @@ This repo is **single-context**:
 │   ├── 0001-....md
 │   └── 0002-....md
 └── packages/
-    ├── ffsync/
+    ├── ffinfo/
     └── ffinfo-cli/
 ```
 

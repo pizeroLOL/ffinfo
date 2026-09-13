@@ -1,4 +1,4 @@
-"""ffinfo 命令行入口。
+"""ffinfo_cli 命令行入口。
 
 真正的用户是 agent —— 输出以 JSON 为主，人类可读的呈现是次要目标。
 """
@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import typer
 
-from ffinfo import __version__
-from ffinfo.login import login_sync
-from ffinfo.paths import credentials_path, identity_path
-from ffsync.errors import FfsyncError
+from ffinfo.errors import FfinfoError
+from ffinfo_cli import __version__
+from ffinfo_cli.login import login_sync
+from ffinfo_cli.paths import credentials_path, identity_path
 
 app = typer.Typer(
-    name="ffinfo",
+    name="ffinfo_cli",
     help="把 Firefox 浏览数据（云端 Sync + 本地 places.sqlite）拉到本地 SQLite，输出 JSON。",
     no_args_is_help=True,
     add_completion=False,
@@ -37,7 +37,7 @@ def main(
         is_eager=True,
     ),
 ) -> None:
-    """ffinfo —— Firefox 数据到本地 SQLite 的搬运工。"""
+    """ffinfo_cli —— Firefox 数据到本地 SQLite 的搬运工。"""
 
 
 @app.command()
@@ -45,7 +45,7 @@ def login() -> None:
     """登录 Mozilla 账号：在浏览器里授权，密码不经过本工具。"""
     try:
         credentials = login_sync(identity_path=identity_path(), credentials_path=credentials_path())
-    except FfsyncError as exc:
+    except FfinfoError as exc:
         typer.echo(f"登录失败：{exc}", err=True)
         raise typer.Exit(code=1) from exc
 

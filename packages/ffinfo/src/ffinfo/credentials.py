@@ -15,7 +15,7 @@ from typing import Final, Self
 
 import pyrage
 
-from ffsync.errors import ConfigurationError, DecryptionError
+from ffinfo.errors import ConfigurationError, DecryptionError
 
 __all__ = ["AgeIdentity", "CredentialStore"]
 

@@ -1,4 +1,4 @@
-# ffsync
+# ffinfo
 
 纯 Python 的 Firefox Sync 客户端库。
 

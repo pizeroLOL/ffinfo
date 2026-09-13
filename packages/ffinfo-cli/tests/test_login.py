@@ -1,4 +1,4 @@
-"""CLI 层：默认路径 + ``ffinfo login`` 的整条编排。
+"""CLI 层：默认路径 + ``ffinfo_cli login`` 的整条编排。
 
 HTTP 用 ``httpx.MockTransport`` 打桩。**keys_jwe 是测试里现场加密的** ——
 产品代码只做解密方向（本库严格只读），所以这里手写一份最小的 JWE 加密器，
@@ -23,10 +23,10 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from ffinfo.login import run_login
-from ffinfo.paths import credentials_path, data_dir, identity_path
-from ffsync.credentials import AgeIdentity
-from ffsync.errors import AuthError
+from ffinfo.credentials import AgeIdentity
+from ffinfo.errors import AuthError
+from ffinfo_cli.login import run_login
+from ffinfo_cli.paths import credentials_path, data_dir, identity_path
 from vectors import SCOPED_KEY
 
 _KEYS_JSON = SCOPED_KEY.payload_json
@@ -41,9 +41,9 @@ def test_paths_follow_xdg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
 
-    assert identity_path() == tmp_path / "cfg" / "ffinfo" / "age-key.txt"
-    assert credentials_path() == tmp_path / "data" / "ffinfo" / "credentials.age"
-    assert data_dir() == tmp_path / "data" / "ffinfo"
+    assert identity_path() == tmp_path / "cfg" / "ffinfo_cli" / "age-key.txt"
+    assert credentials_path() == tmp_path / "data" / "ffinfo_cli" / "credentials.age"
+    assert data_dir() == tmp_path / "data" / "ffinfo_cli"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="只有 Windows 才有 %APPDATA%")
@@ -51,8 +51,8 @@ def test_paths_use_appdata_on_windows(monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
 
-    assert identity_path() == tmp_path / "roaming" / "ffinfo" / "age-key.txt"
-    assert credentials_path() == tmp_path / "local" / "ffinfo" / "credentials.age"
+    assert identity_path() == tmp_path / "roaming" / "ffinfo_cli" / "age-key.txt"
+    assert credentials_path() == tmp_path / "local" / "ffinfo_cli" / "credentials.age"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="XDG 是 POSIX 的约定")
@@ -60,8 +60,8 @@ def test_paths_fall_back_to_home(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.delenv("XDG_DATA_HOME", raising=False)
 
-    assert identity_path() == Path.home() / ".config" / "ffinfo" / "age-key.txt"
-    assert credentials_path() == Path.home() / ".local" / "share" / "ffinfo" / "credentials.age"
+    assert identity_path() == Path.home() / ".config" / "ffinfo_cli" / "age-key.txt"
+    assert credentials_path() == Path.home() / ".local" / "share" / "ffinfo_cli" / "credentials.age"
 
 
 # ── login 的整条编排 ─────────────────────────────────────────────────────
@@ -150,8 +150,8 @@ async def test_login_encrypts_the_credentials_on_disk(tmp_path: Path) -> None:
 async def test_login_round_trips_through_the_vault(tmp_path: Path) -> None:
     credentials = await _login(tmp_path, _FakeReceiver())
 
-    from ffsync.credentials import CredentialStore
-    from ffsync.oauth import Credentials
+    from ffinfo.credentials import CredentialStore
+    from ffinfo.oauth import Credentials
 
     reopened = CredentialStore(
         identity=AgeIdentity.from_file(tmp_path / "age-key.txt"),

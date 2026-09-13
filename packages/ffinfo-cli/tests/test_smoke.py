@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typer.testing import CliRunner
 
-from ffinfo import __version__
-from ffinfo.cli import app
+from ffinfo_cli import __version__
+from ffinfo_cli.cli import app
 
 runner = CliRunner()
 

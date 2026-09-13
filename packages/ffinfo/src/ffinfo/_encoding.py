@@ -2,8 +2,8 @@
 
 同步协议里两种数据的错误语义不同，上层要分开处理：
 
-* **密钥材料**坏掉 → :class:`~ffsync.errors.KeyDerivationError` —— 整体失败，没救
-* **记录**坏掉 → :class:`~ffsync.errors.DecryptionError` —— 单条跳过并计数（见 05 号 ticket）
+* **密钥材料**坏掉 → :class:`~ffinfo.errors.KeyDerivationError` —— 整体失败，没救
+* **记录**坏掉 → :class:`~ffinfo.errors.DecryptionError` —— 单条跳过并计数（见 05 号 ticket）
 
 所以这里**成对**提供解码器，让调用点一眼看出拿到的是哪种语义，
 而不是把异常类型当参数传进来。
@@ -15,7 +15,7 @@ import base64
 import binascii
 from typing import Final
 
-from ffsync.errors import DecryptionError, FfsyncError, KeyDerivationError
+from ffinfo.errors import DecryptionError, FfinfoError, KeyDerivationError
 
 __all__ = ["b64url_encode", "key_b64", "key_b64url", "record_b64", "record_b64url", "record_hex"]
 
@@ -56,7 +56,7 @@ def record_hex(data: str, what: str) -> bytes:
         raise DecryptionError(msg) from exc
 
 
-def _decode_base64(data: str, what: str, error: type[FfsyncError]) -> bytes:
+def _decode_base64(data: str, what: str, error: type[FfinfoError]) -> bytes:
     try:
         return base64.b64decode(data, validate=True)
     except (binascii.Error, ValueError) as exc:
@@ -64,7 +64,7 @@ def _decode_base64(data: str, what: str, error: type[FfsyncError]) -> bytes:
         raise error(msg) from exc
 
 
-def _decode_base64url(data: str, what: str, error: type[FfsyncError]) -> bytes:
+def _decode_base64url(data: str, what: str, error: type[FfinfoError]) -> bytes:
     try:
         return base64.urlsafe_b64decode(data + "=" * (-len(data) % _URLSAFE_PAD))
     except (binascii.Error, ValueError) as exc:

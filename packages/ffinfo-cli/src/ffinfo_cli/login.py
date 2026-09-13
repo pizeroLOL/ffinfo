@@ -1,4 +1,4 @@
-"""``ffinfo login`` —— 走一遍 Mozilla 的 oob 授权，把凭据加密存到本地。
+"""``ffinfo_cli login`` —— 走一遍 Mozilla 的 oob 授权，把凭据加密存到本地。
 
 **密码全程不经过本工具**：授权在 accounts.firefox.com 的网页上完成，
 我们只经手授权码。
@@ -14,8 +14,8 @@ from pathlib import Path
 import httpx
 import typer
 
-from ffsync.credentials import AgeIdentity, CredentialStore
-from ffsync.oauth import (
+from ffinfo.credentials import AgeIdentity, CredentialStore
+from ffinfo.oauth import (
     FIREFOX_DESKTOP_CLIENT_ID,
     OLD_SYNC_READ_SCOPE,
     CodeReceiver,

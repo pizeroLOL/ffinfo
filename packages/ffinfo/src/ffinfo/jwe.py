@@ -17,8 +17,8 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from ffsync._encoding import b64url_encode, record_b64url
-from ffsync.errors import DecryptionError, KeyDerivationError
+from ffinfo._encoding import b64url_encode, record_b64url
+from ffinfo.errors import DecryptionError, KeyDerivationError
 
 __all__ = ["EphemeralKeyPair"]
 

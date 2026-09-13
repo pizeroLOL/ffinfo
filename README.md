@@ -7,7 +7,7 @@
 
 | 包 | 职责 |
 |---|---|
-| `packages/ffsync` | 纯 Python Firefox Sync 客户端库：OAuth · 密钥派生 · 解密 · 存储协议 |
+| `packages/ffinfo` | 纯 Python Firefox Sync 客户端库：OAuth · 密钥派生 · 解密 · 存储协议 |
 | `packages/ffinfo-cli` | CLI：本地 SQLite · 双源合并 · export/import · JSON 输出 |
 
 ## 快速开始

@@ -15,11 +15,11 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import pytest
 
-from ffsync.credentials import AgeIdentity, CredentialStore
-from ffsync.errors import AuthError
-from ffsync.jwe import EphemeralKeyPair
-from ffsync.keys import OLD_SYNC_SCOPE
-from ffsync.oauth import (
+from ffinfo.credentials import AgeIdentity, CredentialStore
+from ffinfo.errors import AuthError
+from ffinfo.jwe import EphemeralKeyPair
+from ffinfo.keys import OLD_SYNC_SCOPE
+from ffinfo.oauth import (
     Credentials,
     OAuthClient,
     OAuthEndpoints,

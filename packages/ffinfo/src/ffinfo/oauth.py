@@ -21,11 +21,11 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from ffsync._encoding import b64url_encode
-from ffsync.crypto import KeyBundle
-from ffsync.errors import AuthError
-from ffsync.jwe import EphemeralKeyPair
-from ffsync.keys import OLD_SYNC_SCOPE, ScopedKey, parse_scoped_keys
+from ffinfo._encoding import b64url_encode
+from ffinfo.crypto import KeyBundle
+from ffinfo.errors import AuthError
+from ffinfo.jwe import EphemeralKeyPair
+from ffinfo.keys import OLD_SYNC_SCOPE, ScopedKey, parse_scoped_keys
 
 __all__ = [
     "FIREFOX_DESKTOP_CLIENT_ID",
@@ -285,7 +285,7 @@ class Credentials(BaseModel):
     """一份可以落盘的凭据：token + 各 scope 的密钥。
 
     本类只管"长什么样"和"怎么序列化"；落盘走 02 的
-    :class:`~ffsync.credentials.CredentialStore`（age 加密 + 权限纪律）。
+    :class:`~ffinfo.credentials.CredentialStore`（age 加密 + 权限纪律）。
     """
 
     model_config = ConfigDict(extra="ignore", frozen=True)

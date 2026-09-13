@@ -1,11 +1,11 @@
 [project]
 name = "ffinfo-workspace"
 version = "0.0.0"
-description = "uv workspace root for ffsync + ffinfo-cli"
+description = "uv workspace root for ffinfo + ffinfo-cli"
 requires-python = ">=3.14"
 # 根是虚拟项目：不打包，但把两个成员拉成依赖，这样裸 `uv sync` 就能装全
 dependencies = [
-    "ffsync",
+    "ffinfo",
     "ffinfo-cli",
 ]
 
@@ -13,7 +13,7 @@ dependencies = [
 members = ["packages/*"]
 
 [tool.uv.sources]
-ffsync = { workspace = true }
+ffinfo = { workspace = true }
 ffinfo-cli = { workspace = true }
 
 # ── 国内镜像（显著加速；开源发布前请改为可选/环境变量）──────
@@ -63,7 +63,7 @@ ignore = [
     "D203",     # 与 D211 冲突
     "D213",     # 与 D212 冲突
     "D400",     # 中文句号「。」结尾是正常的
-    "D403",     # 产品名（ffinfo / ffsync）小写开头是正常的
+    "D403",     # 产品名（ffinfo / ffinfo-cli）小写开头是正常的
     "D415",
     "RUF001",   # 全角标点在中文注释里是正常的
     "RUF002",
@@ -86,14 +86,14 @@ include = ["packages/*/src", "packages/*/tests"]
 pythonVersion = "3.14"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false
-# 测试向量模块（packages/ffsync/tests/vectors.py）不在包内，显式告诉 pyright 去哪找
-extraPaths = ["packages/ffsync/tests"]
+# 测试向量模块（packages/ffinfo/tests/vectors.py）不在包内，显式告诉 pyright 去哪找
+extraPaths = ["packages/ffinfo/tests"]
 
 # ── pytest ─────────────────────────────────────────────────
 [tool.pytest.ini_options]
 testpaths = ["packages/*/tests"]
-# tests 目录也在 path 上：测试向量模块（packages/ffsync/tests/vectors.py）要能被 import
-pythonpath = ["packages/ffsync/src", "packages/ffinfo-cli/src", "packages/ffsync/tests"]
+# tests 目录也在 path 上：测试向量模块（packages/ffinfo/tests/vectors.py）要能被 import
+pythonpath = ["packages/ffinfo/src", "packages/ffinfo-cli/src", "packages/ffinfo/tests"]
 asyncio_mode = "auto"
 # 两个包各有同名 test 文件，用 importlib 模式避免 basename 冲突
 addopts = "-ra --strict-markers --import-mode=importlib"

@@ -1,7 +1,7 @@
 """age 凭据存储（02 号 ticket）。
 
-测试打在 :class:`~ffsync.credentials.AgeIdentity` 与
-:class:`~ffsync.credentials.CredentialStore` 的公开边界上，用真的文件系统（``tmp_path``），
+测试打在 :class:`~ffinfo.credentials.AgeIdentity` 与
+:class:`~ffinfo.credentials.CredentialStore` 的公开边界上，用真的文件系统（``tmp_path``），
 不 mock pyrage —— 这里要验的正是"落盘之后到底安不安全"。
 """
 
@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from ffsync.credentials import AgeIdentity, CredentialStore
-from ffsync.errors import ConfigurationError, DecryptionError
+from ffinfo.credentials import AgeIdentity, CredentialStore
+from ffinfo.errors import ConfigurationError, DecryptionError
 
 _POSIX_ONLY = pytest.mark.skipif(
     os.name != "posix", reason="POSIX 权限位在 Windows 上不存在（那边走 ACL）"

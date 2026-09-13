@@ -10,9 +10,9 @@ import base64
 
 import pytest
 
-from ffsync.errors import DecryptionError
-from ffsync.jwe import EphemeralKeyPair
-from ffsync.keys import OLD_SYNC_SCOPE, parse_scoped_keys
+from ffinfo.errors import DecryptionError
+from ffinfo.jwe import EphemeralKeyPair
+from ffinfo.keys import OLD_SYNC_SCOPE, parse_scoped_keys
 from vectors import JWE
 
 

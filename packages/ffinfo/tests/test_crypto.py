@@ -10,8 +10,8 @@ import json
 
 import pytest
 
-from ffsync.crypto import EncryptedPayload, KeyBundle
-from ffsync.errors import DecryptionError, KeyDerivationError
+from ffinfo.crypto import EncryptedPayload, KeyBundle
+from ffinfo.errors import DecryptionError, KeyDerivationError
 from vectors import AES, SCOPED_KEY
 
 

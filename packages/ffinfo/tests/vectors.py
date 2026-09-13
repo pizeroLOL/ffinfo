@@ -1,4 +1,4 @@
-"""ffsync 的测试向量 —— 全部有出处，**不由被测代码自己产生**。
+"""ffinfo 的测试向量 —— 全部有出处，**不由被测代码自己产生**。
 
 三条向量：
 
@@ -116,7 +116,7 @@ JWE = JweVector(
 #   · 明文结构 = `sync15/src/record_types.rs` 的 CryptoKeysRecord +
 #     `syncstorage-rs/docs/src/sync-client/global-storage-v5.md` §crypto/keys
 #   · 根密钥与 IV = 向量 1 的官方密钥材料（key_bundle.rs）
-#   · 密文 / HMAC = 用 pyca/cryptography 独立实现生成（不经过 ffsync）
+#   · 密文 / HMAC = 用 pyca/cryptography 独立实现生成（不经过 ffinfo）
 #   · default / history / bookmarks 的 bulk key = sha256("ffinfo vector: ...")，纯占位
 
 
@@ -125,7 +125,7 @@ JWE = JweVector(
 #   · 明文结构 = `sync15/src/record_types.rs` 的 CryptoKeysRecord +
 #     `syncstorage-rs/docs/src/sync-client/global-storage-v5.md` §crypto/keys
 #   · 根密钥与 IV = 向量 1 的官方密钥材料（key_bundle.rs）
-#   · 密文 / HMAC = 用 pyca/cryptography 独立实现生成（不经过 ffsync）
+#   · 密文 / HMAC = 用 pyca/cryptography 独立实现生成（不经过 ffinfo）
 #   · default / history / bookmarks 的 bulk key = sha256("ffinfo vector: ...")，纯占位
 
 

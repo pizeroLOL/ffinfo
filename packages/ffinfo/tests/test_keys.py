@@ -1,6 +1,6 @@
 """密钥层次：scoped key → 同步 KeyBundle → 各 collection 的 KeyBundle（01 的另一半）。
 
-测试打在 :mod:`ffsync.keys` 的公开函数/类上，向量来自官方（见 ``vectors.py``）。
+测试打在 :mod:`ffinfo.keys` 的公开函数/类上，向量来自官方（见 ``vectors.py``）。
 """
 
 from __future__ import annotations
@@ -9,9 +9,9 @@ import json
 
 import pytest
 
-from ffsync.crypto import EncryptedPayload, KeyBundle
-from ffsync.errors import DecryptionError, KeyDerivationError
-from ffsync.keys import OLD_SYNC_SCOPE, CollectionKeys, parse_scoped_keys
+from ffinfo.crypto import EncryptedPayload, KeyBundle
+from ffinfo.errors import DecryptionError, KeyDerivationError
+from ffinfo.keys import OLD_SYNC_SCOPE, CollectionKeys, parse_scoped_keys
 from vectors import CRYPTO_KEYS, SCOPED_KEY
 
 

@@ -1,5 +1,5 @@
 [project]
-name = "ffsync"
+name = "ffinfo"
 version = "0.1.0"
 description = "纯 Python Firefox Sync 客户端库：OAuth · 密钥派生 · 记录解密 · 存储协议"
 readme = "README.md"
@@ -17,4 +17,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ffsync"]
+packages = ["src/ffinfo"]

@@ -17,9 +17,9 @@ from typing import Final, Self
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from ffsync._encoding import key_b64url
-from ffsync.crypto import EncryptedPayload, KeyBundle
-from ffsync.errors import DecryptionError, KeyDerivationError
+from ffinfo._encoding import key_b64url
+from ffinfo.crypto import EncryptedPayload, KeyBundle
+from ffinfo.errors import DecryptionError, KeyDerivationError
 
 __all__ = ["OLD_SYNC_SCOPE", "CollectionKeys", "ScopedKey", "parse_scoped_keys"]
 
@@ -42,7 +42,7 @@ class ScopedKey(BaseModel):
         return key_b64url(self.k, f"scoped key 的 k（scope={self.scope}）")
 
     def to_key_bundle(self) -> KeyBundle:
-        """切出同步用的 :class:`~ffsync.crypto.KeyBundle`。"""
+        """切出同步用的 :class:`~ffinfo.crypto.KeyBundle`。"""
         return KeyBundle.from_ksync_bytes(self.key_bytes())
 
 
