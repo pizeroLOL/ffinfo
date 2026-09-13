@@ -5,10 +5,19 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
+import pytest
+
 from ffinfo.storage import EncryptedBso
-from ffinfo_cli.store import SyncRecord, open_database, replace_collection
+from ffinfo_cli.store import (
+    CollectionBatch,
+    SyncRecord,
+    open_database,
+    replace_collection,
+    store_batches,
+)
 
 
 def record(
@@ -128,3 +137,126 @@ async def test_replace_collection_accepts_empty(tmp_path: Path) -> None:
 
     assert stored == 0
     assert await SyncRecord.count() == 0
+
+
+# ── 对账：全量之后什么没了（18 号） ───────────────────────────────────────
+
+
+async def test_full_replace_reports_deleted_and_updated(tmp_path: Path) -> None:
+    """``--full`` 的账要能对得上：agent 问"什么被删了"，答案不能永远是 0。"""
+    engine = await open_database(tmp_path / "db.sqlite")
+    await store_batches(
+        engine,
+        [
+            CollectionBatch(
+                collection="history", records=[record("a"), record("b"), record("c")], full=True
+            )
+        ],
+    )
+
+    results = await store_batches(
+        engine,
+        [
+            CollectionBatch(
+                collection="history", records=[record("b"), record("c"), record("d")], full=True
+            )
+        ],
+    )
+
+    applied = results["history"]
+    assert applied.inserted == 1  # d
+    assert applied.updated == 2  # b、c 还在
+    assert applied.deleted == 1  # a 没了
+    assert applied.total == 4  # 前后并集 {a,b,c,d}
+
+
+# ── 不变式：库里有行 ⇔ 记录存在（18 号） ─────────────────────────────────
+
+
+async def test_duplicate_ids_in_one_batch_are_folded(tmp_path: Path) -> None:
+    """同一批里同 id 出现两次 —— 只留最新的那条，库里不会出现两行。"""
+    engine = await open_database(tmp_path / "db.sqlite")
+
+    results = await store_batches(
+        engine,
+        [
+            CollectionBatch(
+                collection="history",
+                records=[record("a", modified=1.0), record("a", modified=5.0, payload="newer")],
+                full=False,
+            )
+        ],
+    )
+
+    assert results["history"].inserted == 1
+    assert await SyncRecord.count() == 1
+    rows = await SyncRecord.select()
+    assert rows[0]["payload"] == "newer"
+
+
+async def test_incremental_ignores_an_older_record(tmp_path: Path) -> None:
+    """变更集里混进旧的 —— 不许拿旧盖新。"""
+    engine = await open_database(tmp_path / "db.sqlite")
+    await store_batches(
+        engine,
+        [CollectionBatch(collection="history", records=[record("a", modified=5.0)], full=False)],
+    )
+
+    results = await store_batches(
+        engine,
+        [
+            CollectionBatch(
+                collection="history",
+                records=[record("a", modified=1.0, payload="old")],
+                full=False,
+            )
+        ],
+    )
+
+    assert results["history"].updated == 0
+    rows = await SyncRecord.select()
+    assert rows[0]["payload"] == "encrypted"
+
+
+async def test_record_identity_is_enforced_by_the_database(tmp_path: Path) -> None:
+    """``(collection, record_id)`` 唯一 —— 绕过代码直接插第二行会被库拒绝。"""
+    engine = await open_database(tmp_path / "db.sqlite")
+    await replace_collection(engine, "history", [record("a")])
+
+    with pytest.raises(sqlite3.IntegrityError):
+        await SyncRecord.insert(
+            SyncRecord(collection="history", record_id="a", modified=2.0, payload="dup")
+        )
+
+
+async def test_old_databases_with_duplicate_rows_are_repaired(tmp_path: Path) -> None:
+    """早期版本写出来的库里可能躺着重复行 —— 开库时收敛，保留 modified 最新的一条。"""
+    path = tmp_path / "old.sqlite"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE sync_records (
+            id INTEGER PRIMARY KEY,
+            collection VARCHAR(64) NOT NULL,
+            record_id VARCHAR(64) NOT NULL,
+            modified DOUBLE PRECISION NOT NULL,
+            payload TEXT,
+            sortindex BIGINT,
+            ttl BIGINT
+        );
+        INSERT INTO sync_records (collection, record_id, modified, payload) VALUES
+            ('history', 'a', 1.0, 'old'),
+            ('history', 'a', 5.0, 'new'),
+            ('bookmarks', 'a', 2.0, 'other');
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    await open_database(path)
+
+    rows = await SyncRecord.select().order_by(SyncRecord.id)
+    assert [(row["collection"], row["record_id"], row["payload"]) for row in rows] == [
+        ("history", "a", "new"),
+        ("bookmarks", "a", "other"),
+    ]

@@ -370,6 +370,24 @@ async def test_incremental_drops_tombstoned_records(tmp_path: Path) -> None:
     assert await stored(tmp_path) == 1
 
 
+async def test_full_sync_reports_what_disappeared(tmp_path: Path) -> None:
+    """``--full`` 的对账：服务器上没了的记录，报告里要看得见（不能恒报 0）。"""
+    fake = FakeSync()
+    fake.counts = {"history": 2}
+    fake.pages = [[bso("a"), bso("b")]]
+    await sync(tmp_path, fake)
+
+    fake.counts = {"history": 1}
+    fake.pages = [[bso("a")]]
+    report = await sync(tmp_path, fake, full=True)
+
+    assert report.mode == "full"
+    assert report.deleted == 1
+    assert report.updated == 1
+    assert report.inserted == 0
+    assert await stored(tmp_path) == 1
+
+
 async def test_backoff_does_not_advance_the_cursor(tmp_path: Path) -> None:
     """退避时游标**原地不动** —— 推了它，那段窗口里的变更就永远丢了。"""
     fake = FakeSync()

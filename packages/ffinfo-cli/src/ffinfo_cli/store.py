@@ -16,6 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Final
 
 from piccolo.columns import BigInt, DoublePrecision, Integer, Text, Varchar
 from piccolo.engine.sqlite import SQLiteEngine
@@ -100,7 +101,11 @@ class StoredVisit:
 
 @dataclass(frozen=True, slots=True)
 class ApplyResult:
-    """一次落库的账。"""
+    """一次落库的账。
+
+    ``inserted`` / ``updated`` / ``deleted`` 是**互斥的三份**：新出现的、本来就有的、
+    没了的那部分 —— 加起来正好是这次碰到的记录总数。
+    """
 
     inserted: int
     updated: int
@@ -140,7 +145,38 @@ async def open_database(path: Path) -> SQLiteEngine:
     await SyncRecord.create_table(if_not_exists=True)
     await SyncCursor.create_table(if_not_exists=True)
     await LocalVisitRow.create_table(if_not_exists=True)
+    await _enforce_record_identity(engine)
     return engine
+
+
+_RECORD_IDENTITY_INDEX: Final = "ux_sync_records_collection_record_id"
+
+
+async def _enforce_record_identity(engine: SQLiteEngine) -> None:
+    """让 ``(collection, record_id)`` 真的唯一 —— "库里有行 ⇔ 记录存在"的底座。
+
+    建过就不再动（检查只是一次 ``sqlite_master`` 查询，很便宜）。老库里如果躺着重复行
+    （早期版本同一批里同 id 出现两次会插出两行），先收敛：每个
+    ``(collection, record_id)`` 只保留 ``modified`` 最新的一条，同值留行号大的。
+    """
+    existing = await SyncRecord.raw(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = {}",
+        _RECORD_IDENTITY_INDEX,
+    )
+    if existing:
+        return
+    await SyncRecord.raw(
+        "DELETE FROM sync_records WHERE id IN ("
+        "SELECT id FROM ("
+        "SELECT id, ROW_NUMBER() OVER ("
+        "PARTITION BY collection, record_id ORDER BY modified DESC, id DESC"
+        ") AS rank FROM sync_records"
+        ") WHERE rank > 1)"
+    )
+    await SyncRecord.raw(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS {_RECORD_IDENTITY_INDEX}"
+        " ON sync_records (collection, record_id)"
+    )
 
 
 # ── 写入 ──────────────────────────────────────────────────────────────────
@@ -172,41 +208,60 @@ async def _write_one(engine: SQLiteEngine, batch: CollectionBatch) -> ApplyResul
 async def _replace(
     engine: SQLiteEngine, collection: str, records: Sequence[EncryptedBso]
 ) -> ApplyResult:
-    """整体替换：删了重插。全量拉取用这个 —— 天然幂等，也不会留下上一轮已删的记录。"""
+    """整体替换：删了重插。全量拉取用这个 —— 天然幂等，也不会留下上一轮已删的记录。
+
+    ``deleted`` 报的是**真的没了的那部分**（老行里没被重插的）—— ``--full`` 的对账
+    就靠它：agent 问"全量之后什么被删了"，答案不能永远是 0。
+    """
     rows = [_row(collection, record) for record in records if record.payload is not None]
+    after = {record.id for record in records if record.payload is not None}
+    before = {
+        str(row["record_id"])
+        for row in await SyncRecord.select(SyncRecord.record_id).where(
+            SyncRecord.collection == collection
+        )
+    }
     await SyncRecord.delete().where(SyncRecord.collection == collection)
     if rows:
         await SyncRecord.insert(*rows)
-    return ApplyResult(inserted=len(rows), updated=0, deleted=0)
+    return ApplyResult(
+        inserted=len(after - before),
+        updated=len(after & before),
+        deleted=len(before - after),
+    )
 
 
 async def _apply(
     engine: SQLiteEngine, collection: str, records: Sequence[EncryptedBso]
 ) -> ApplyResult:
-    """增量 upsert：新记录插入、已有的覆盖、墓碑删行。
+    """增量 upsert：新记录插入、更新的覆盖、墓碑删行。
 
     增量拉回来的只是**变更集**，所以不能像全量那样"删了重插" ——
     那会把没变更的几千条一起端掉。
+
+    **只在 ``modified`` 更新时才覆盖**：变更集里混进一条旧的（服务器重发、
+    两份导出交叉）不能把库里的新数据盖回去。同一批里同 id 出现多次时，
+    只有最新的那条算数 —— 库里的唯一索引不接受两行。
     """
     existing = {
-        str(row["record_id"]): row["id"]
-        for row in await SyncRecord.select(SyncRecord.id, SyncRecord.record_id).where(
-            SyncRecord.collection == collection
-        )
+        str(row["record_id"]): (int(row["id"]), float(row["modified"]))
+        for row in await SyncRecord.select(
+            SyncRecord.id, SyncRecord.record_id, SyncRecord.modified
+        ).where(SyncRecord.collection == collection)
     }
 
     fresh: list[SyncRecord] = []
     updates: list[tuple[int, EncryptedBso]] = []
     removals: list[int] = []
-    for record in records:
-        row_id = existing.get(record.id)
+    for record in _newest_per_id(records):
+        entry = existing.get(record.id)
         if record.payload is None:
-            if row_id is not None:
-                removals.append(row_id)
-        elif row_id is None:
+            if entry is not None:
+                removals.append(entry[0])
+        elif entry is None:
             fresh.append(_row(collection, record))
-        else:
-            updates.append((row_id, record))
+        elif record.modified > entry[1]:
+            updates.append((entry[0], record))
 
     if fresh:
         await SyncRecord.insert(*fresh)
@@ -225,14 +280,29 @@ async def _apply(
     return ApplyResult(inserted=len(fresh), updated=len(updates), deleted=len(removals))
 
 
+def _newest_per_id(records: Sequence[EncryptedBso]) -> list[EncryptedBso]:
+    """同一批里同 id 出现多次时只留最新的（``modified`` 大者胜，平手留后面的）。
+
+    服务器理论上不会这么发，但真发了也不该插出两行 —— 唯一索引会拒绝，
+    那是比"静默丢一条"更响的失败，只是没必要走到那一步。
+    """
+    newest: dict[str, EncryptedBso] = {}
+    for record in records:
+        current = newest.get(record.id)
+        if current is None or record.modified >= current.modified:
+            newest[record.id] = record
+    return list(newest.values())
+
+
 async def replace_collection(
     engine: SQLiteEngine, collection: str, records: Sequence[EncryptedBso]
 ) -> int:
-    """用这一批记录整体替换**一个** collection，返回落库条数。"""
+    """用这一批记录整体替换**一个** collection，返回这次落进去多少条（新插 + 覆盖）。"""
     result = await store_batches(
         engine, [CollectionBatch(collection=collection, records=records, full=True)]
     )
-    return result[collection].inserted
+    applied = result[collection]
+    return applied.inserted + applied.updated
 
 
 def _row(collection: str, record: EncryptedBso) -> SyncRecord:
@@ -398,7 +468,7 @@ async def merge_sync_records(
     fresh: list[SyncRecord] = []
     updates: list[PortableRecord] = []
     kept = 0
-    for item in records:
+    for item in _newest_per_record(records):
         if item.payload is None:
             kept += 1
             continue
@@ -434,6 +504,20 @@ async def merge_sync_records(
         )
 
     return ApplyResult(inserted=len(fresh), updated=len(updates), deleted=0), kept
+
+
+def _newest_per_record(records: Sequence[PortableRecord]) -> list[PortableRecord]:
+    """同一份导出里 ``(collection, record_id)`` 出现多次时只留最新的。
+
+    唯一索引不接受两行同 id —— 别让文件里的重复把整次导入打翻。
+    """
+    newest: dict[tuple[str, str], PortableRecord] = {}
+    for item in records:
+        key = (item.collection, item.record_id)
+        current = newest.get(key)
+        if current is None or item.modified >= current.modified:
+            newest[key] = item
+    return list(newest.values())
 
 
 async def merge_sync_cursors(engine: SQLiteEngine, cursors: Sequence[PortableCursor]) -> int:
