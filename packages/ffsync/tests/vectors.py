@@ -90,6 +90,36 @@ SCOPED_KEY = ScopedKeyVector(
 )
 
 
+@dataclass(frozen=True)
+class JweVector:
+    """一条真实 keys_jwe，以及解开它的固定私钥。"""
+
+    jwe: str
+    private_key_d_b64: str
+    expected_keys_json: str
+
+
+JWE = JweVector(
+    jwe=(
+        "eyJhbGciOiJFQ0RILUVTIiwia2lkIjoiNFBKTTl5dGVGeUtsb21ILWd2UUtyWGZ0a0N3ak9HNHRfTmpYVXhLM1VqSSIsImVwayI6"
+        "eyJrdHkiOiJFQyIsImNydiI6IlAtMjU2IiwieCI6IlB3eG9Na1RjSVZ2TFlKWU4wM2R0Y3o2TEJrR0FHaU1hZWlNQ3lTZXEz"
+        "b2MiLCJ5IjoiLUYtTllRRDZwNUdSQ2ZoYm1hN3NvNkhxdExhVlNub012S0pFcjFBeWlaSSJ9LCJlbmMiOiJBMjU2R0NNIn0"
+        "..b9FPhjjpmAmo_rP8.ur9jTry21Y2trvtcanSFmAtiRfF6s6qqyg6ruRal7PCwa7PxDzAuMN6DZW5BiK8UREOH08-FyRcIgdDOm5Z"
+        "q8KwVAn56PGfcH30aNDGQNkA_mpfjx5Tj2z8kI6ryLWew4PGZb-PsL1g-_eyXhktq7dAhetjNYttKwSREWQFokv7N3nJGpukBq"
+        "nwL1ost-MjDXlINZLVJKAiMHDcu-q7Epitwid2c2JVGOSCJjbZ4-zbxVmZ4o9xhFb2lbvdiaMygH6bPlrjEK99uT6XKtaIZmy"
+        "DwftbD6G3x4On-CqA2TNL6ILRaJMtmyX--ctL0IrngUIHg_F0Wz94v.zBD8NACkUcZTPLH0tceGnA"
+    ),
+    private_key_d_b64="UayD4kn_4QHvLvLLSSaANfDUp9AcQndQu_TohQKoyn8",
+    expected_keys_json=SCOPED_KEY.payload_json,
+)
+# ⚠️ 上游**没有**现成的 crypto/keys 测试向量，所以这条是本地生成的：
+#   · 明文结构 = `sync15/src/record_types.rs` 的 CryptoKeysRecord +
+#     `syncstorage-rs/docs/src/sync-client/global-storage-v5.md` §crypto/keys
+#   · 根密钥与 IV = 向量 1 的官方密钥材料（key_bundle.rs）
+#   · 密文 / HMAC = 用 pyca/cryptography 独立实现生成（不经过 ffsync）
+#   · default / history / bookmarks 的 bulk key = sha256("ffinfo vector: ...")，纯占位
+
+
 # ── 向量 3：crypto/keys 记录 ────────────────────────────────────────────────
 # ⚠️ 上游**没有**现成的 crypto/keys 测试向量，所以这条是本地生成的：
 #   · 明文结构 = `sync15/src/record_types.rs` 的 CryptoKeysRecord +
@@ -148,3 +178,10 @@ CRYPTO_KEYS = CryptoKeysVector(
     bookmarks_enc_hex="6ef074d0d9393f146a92624698b2fe1a4d92193596e00e3d9cde37eb97c0c395",
     bookmarks_mac_hex="3da8248dd0aa2e71a07910e2a7e3ba3a5cae2bc4eb938b0dad3e7bf1f2dd6fdb",
 )
+
+
+# ── 向量 4：keys_jwe（OAuth 授权时 Mozilla 回给客户端的加密 scope 密钥） ─────
+# 出处：application-services/components/fxa-client/src/internal/scoped_keys.rs
+#       test_flow —— 一把固定 P-256 私钥 + 一条真实 keys_jwe → 期望的 keys JSON。
+# 结构：header..encrypted_key.iv.ciphertext.tag（第二段是空的 —— ECDH-ES 直接模式）
+# 期望输出就是向量 2 的那份 JSON，两条向量在 03 里会接上。

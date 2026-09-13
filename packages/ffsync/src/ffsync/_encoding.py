@@ -17,9 +17,14 @@ from typing import Final
 
 from ffsync.errors import DecryptionError, FfsyncError, KeyDerivationError
 
-__all__ = ["key_b64", "key_b64url", "record_b64", "record_hex"]
+__all__ = ["b64url_encode", "key_b64", "key_b64url", "record_b64", "record_b64url", "record_hex"]
 
 _URLSAFE_PAD: Final = 4
+
+
+def b64url_encode(data: bytes) -> str:
+    """字节 → base64url（无填充）。"""
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
 
 
 def key_b64(data: str, what: str) -> bytes:
@@ -29,11 +34,12 @@ def key_b64(data: str, what: str) -> bytes:
 
 def key_b64url(data: str, what: str) -> bytes:
     """base64url（无填充）→ 字节。**密钥材料**专用。"""
-    try:
-        return base64.urlsafe_b64decode(data + "=" * (-len(data) % _URLSAFE_PAD))
-    except (binascii.Error, ValueError) as exc:
-        msg = f"{what} 不是合法的 base64url"
-        raise KeyDerivationError(msg) from exc
+    return _decode_base64url(data, what, KeyDerivationError)
+
+
+def record_b64url(data: str, what: str) -> bytes:
+    """base64url（无填充）→ 字节。**记录字段**专用。"""
+    return _decode_base64url(data, what, DecryptionError)
 
 
 def record_b64(data: str, what: str) -> bytes:
@@ -55,4 +61,12 @@ def _decode_base64(data: str, what: str, error: type[FfsyncError]) -> bytes:
         return base64.b64decode(data, validate=True)
     except (binascii.Error, ValueError) as exc:
         msg = f"{what} 不是合法的 base64"
+        raise error(msg) from exc
+
+
+def _decode_base64url(data: str, what: str, error: type[FfsyncError]) -> bytes:
+    try:
+        return base64.urlsafe_b64decode(data + "=" * (-len(data) % _URLSAFE_PAD))
+    except (binascii.Error, ValueError) as exc:
+        msg = f"{what} 不是合法的 base64url"
         raise error(msg) from exc
