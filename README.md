@@ -19,6 +19,16 @@ uv run ffinfo-cli sync               # 从 Sync 拉数据，输出 JSON
 uv run ffinfo-cli list --limit 20    # 解密后的浏览历史，输出 JSON
 ```
 
+**本地那半历史**（云端同步只有 5000 条 / 60 天的上限）要在**装了 Firefox 的机器**上搬：
+
+```bash
+# 源机器（有 Firefox）
+uv run ffinfo-cli export portable.sqlite     # 连 places.sqlite-wal 一起带走
+
+# 目标机器
+uv run ffinfo-cli import portable.sqlite     # 与云端数据合并，每条标出来源
+```
+
 ## 开发
 
 ```bash

@@ -19,4 +19,5 @@ def test_version_flag() -> None:
 def test_help_lists_commands() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "sync" in result.stdout
+    for command in ("sync", "list", "export", "import"):
+        assert command in result.stdout

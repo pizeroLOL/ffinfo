@@ -5,6 +5,12 @@
 
 from __future__ import annotations
 
+import os
+import socket
+import sys
+from pathlib import Path
+from typing import Final
+
 import typer
 
 from ffinfo.errors import BackoffError, FfinfoError
@@ -13,12 +19,23 @@ from ffinfo_cli.list import list_blocking, parse_since
 from ffinfo_cli.login import login_sync
 from ffinfo_cli.paths import credentials_path, database_path, identity_path
 from ffinfo_cli.sync import sync_blocking
+from ffinfo_cli.transfer import export_blocking, import_blocking
 
 app = typer.Typer(
     name="ffinfo-cli",
     help="把 Firefox 浏览数据（云端 Sync + 本地 places.sqlite）拉到本地 SQLite，输出 JSON。",
     no_args_is_help=True,
     add_completion=False,
+)
+
+
+# 带 Path 标注的参数，默认值必须写成模块级单例 ——
+# ruff 的 B008 对"默认值是函数调用"的判定在 Path 上会触发（str / int 反而不会），
+# 而 typer 的 Argument / Option 本来就是个函数调用。
+_DESTINATION: Final = typer.Argument(..., help="便携文件写到哪（.sqlite）")
+_SOURCE: Final = typer.Argument(..., help="export 产出的那份文件")
+_PROFILE: Final = typer.Option(
+    None, "--profile", help="手动指定 Firefox profile 目录（自动找不到时用）"
 )
 
 
@@ -135,6 +152,48 @@ def list_command(
         raise typer.Exit(code=1) from exc
 
     typer.echo(report.to_json())
+
+
+@app.command()
+def export(
+    destination: Path = _DESTINATION,
+    profile: Path | None = _PROFILE,
+) -> None:
+    """在**有 Firefox 的机器**上跑：把本地历史导出成一份便携文件。
+
+    会连 ``places.sqlite-wal`` 一起带走 —— 只拷主文件会静默丢掉最近的记录。
+    """
+    try:
+        report = export_blocking(
+            database_path=database_path(),
+            destination=destination,
+            home=Path.home(),
+            platform=sys.platform,
+            env=os.environ,
+            machine=socket.gethostname(),
+            profile_path=profile,
+        )
+    except FfinfoError as exc:
+        typer.echo(f"导出失败：{exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(report.to_json())
+
+
+@app.command(name="import")
+def import_command(
+    source: Path = _SOURCE,
+) -> None:
+    """在**目标机器**上跑：把便携文件并进本地库，查询时与云端数据合并。"""
+    try:
+        report = import_blocking(database_path=database_path(), source=source)
+    except FfinfoError as exc:
+        typer.echo(f"导入失败：{exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(report.to_json())
+    for warning in report.warnings:
+        typer.echo(f"警告：{warning}", err=True)
 
 
 @app.command()

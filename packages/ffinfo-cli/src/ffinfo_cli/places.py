@@ -60,7 +60,11 @@ class Profile:
     """一个 Firefox profile。"""
 
     name: str
-    """``profiles.ini`` 里的 ``Name``（人看的名字，不是目录名）。"""
+    """``profiles.ini`` 里的 ``Name``（人看的名字，不是目录名）。
+
+    用 ``--profile`` 手动指定时退化成**目录名** —— 那条路上我们不去翻 ini，
+    编一个"看起来像 Name"的值反而更误导。
+    """
 
     path: Path
     """profile 目录 —— ``places.sqlite`` 就在里面。"""

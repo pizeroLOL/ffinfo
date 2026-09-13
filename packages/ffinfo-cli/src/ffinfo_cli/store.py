@@ -23,6 +23,7 @@ from piccolo.table import Table
 
 from ffinfo.storage import EncryptedBso
 from ffinfo_cli._time import from_microseconds, to_microseconds
+from ffinfo_cli.portable import PortableCursor, PortableRecord
 
 __all__ = [
     "ApplyResult",
@@ -34,6 +35,8 @@ __all__ = [
     "load_cursor",
     "load_local_visits",
     "load_records",
+    "merge_sync_cursors",
+    "merge_sync_records",
     "open_database",
     "replace_collection",
     "save_cursor",
@@ -368,3 +371,88 @@ async def load_local_visits(engine: SQLiteEngine) -> tuple[StoredVisit, ...]:
         )
         for row in rows
     )
+
+
+# ── 导入时的合并（便携文件 → 本地库） ─────────────────────────────────────
+
+
+async def merge_sync_records(
+    engine: SQLiteEngine, records: Sequence[PortableRecord]
+) -> tuple[ApplyResult, int]:
+    """把导出来的云端记录并进库。返回 ``(落库的账, 被保住没动的条数)``。
+
+    **只在导出的那条更新时才覆盖。** 目标机器可能自己 sync 过、比这份导出还新 ——
+    拿旧数据把新数据盖回去是不可逆的损失，所以这里认 ``modified``，不是无脑 upsert。
+
+    墓碑（``payload`` 为 ``None``）直接跳过：库里的约定是"有行 == 这条记录存在"
+    （见本模块开头的说明），收下一条空记录会把这个约定捅破。
+    """
+    _bind(engine)
+    existing = {
+        (str(row["collection"]), str(row["record_id"])): float(row["modified"])
+        for row in await SyncRecord.select(
+            SyncRecord.collection, SyncRecord.record_id, SyncRecord.modified
+        )
+    }
+
+    fresh: list[SyncRecord] = []
+    updates: list[PortableRecord] = []
+    kept = 0
+    for item in records:
+        if item.payload is None:
+            kept += 1
+            continue
+        current = existing.get((item.collection, item.record_id))
+        if current is None:
+            fresh.append(
+                SyncRecord(
+                    collection=item.collection,
+                    record_id=item.record_id,
+                    modified=item.modified,
+                    payload=item.payload,
+                    sortindex=item.sortindex,
+                    ttl=item.ttl,
+                )
+            )
+        elif item.modified > current:
+            updates.append(item)
+        else:
+            kept += 1
+
+    if fresh:
+        await SyncRecord.insert(*fresh)
+    for item in updates:
+        await SyncRecord.update(
+            {
+                SyncRecord.modified: item.modified,
+                SyncRecord.payload: item.payload,
+                SyncRecord.sortindex: item.sortindex,
+                SyncRecord.ttl: item.ttl,
+            }
+        ).where(
+            (SyncRecord.collection == item.collection) & (SyncRecord.record_id == item.record_id)
+        )
+
+    return ApplyResult(inserted=len(fresh), updated=len(updates), deleted=0), kept
+
+
+async def merge_sync_cursors(engine: SQLiteEngine, cursors: Sequence[PortableCursor]) -> int:
+    """推进游标，返回推进了几个。
+
+    **只往前推。** 旧游标会把已经拉过的区间重拉一遍；更糟的是把"上次同步到哪儿"
+    这个判断依据改小 —— 那之后真正的增量就再也不会去拉了。
+    """
+    advanced = 0
+    for item in cursors:
+        current = await load_cursor(engine, item.collection)
+        if current is not None and item.last_modified <= current:
+            continue
+        await save_cursor(
+            engine,
+            item.collection,
+            last_modified=item.last_modified,
+            synced_at=item.synced_at,
+            records=item.records,
+        )
+        advanced += 1
+    return advanced

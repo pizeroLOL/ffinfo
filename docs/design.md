@@ -268,6 +268,76 @@ struct HistoryRecord {
 > 这里说的 A / B 是**本地**那个文件要不要读 —— 那是用户自己机器上的文件，来源清楚，
 > 将来想做还能做。
 
+### 3.9 本地源：places.sqlite 与 export/import（08 号，2026-09-14）
+
+**profile 定位不猜目录名**（形如 `<8位随机>.default-release`），走 Firefox 自己的
+`profiles.ini`，认它标的那个 `Default=1`；新版 Firefox 把"默认是哪个"记在
+`[InstallXXXX]` 段，也认。三平台根目录：
+
+| 平台 | 根目录 |
+| --- | --- |
+| macOS | `~/Library/Application Support/Firefox` |
+| Linux | `~/.mozilla/firefox` · `firefox-esr` · **Snap** · **Flatpak**（四种落脚点） |
+| Windows | `%APPDATA%` 与 `%LOCALAPPDATA%` 下的 `Mozilla/Firefox` |
+
+`profiles.ini` 没了就兜底扫一层目录找 `places.sqlite` —— 文件在就不该说"找不到"。
+`home` / `platform` / `env` 全部从参数进，所以 macOS 与 Windows 的分支在 Linux 上就能测。
+
+#### ⚠️ WAL：导出必须连 `-wal` / `-shm` 一起带走
+
+Firefox 跑着的时候库是 WAL 模式，**最近的访问还在 `places.sqlite-wal` 里**。
+只拷主文件**不会报错**，只会静默少掉那部分。
+
+**事后判断不出 `-wal` 是不是丢了**：Firefox 正常关闭之后，库照样是 WAL 模式、
+照样没有 `-wal` 文件 —— "WAL 模式 + 没有 -wal" 根本不是证据。所以**防线只能在导出端**：
+`snapshot_places` 把附属文件一起复制、再把 WAL 折进快照（`journal_mode=DELETE`），
+折完 `quick_check` 自检。便携文件的元数据里记下导出当时的 WAL 状态
+（`wal_bytes` / `wal_carried`），`import` 在"说有 WAL 却没带出来"时**明确报警**。
+
+#### 合并键：`(url, 访问时刻)`
+
+云端那条的时刻来自记录里的 `date`，本地那条来自 `moz_historyvisits.visit_date` ——
+两边都是 PRTime **微秒**。所以只要换算不引入误差，它们就能精确对上。这也是
+`ffinfo_cli/_time.py` 坚持整数运算（而不是 `value / 1_000_000`）的原因：
+**差 1 微秒，同一次访问就会出两行。**
+
+两个源都有 → 一行，标 `both`；只有一边 → 标 `sync` 或 `local`；
+本地源是空的（目标机器没导入过）就自然降级成单源。
+
+#### 便携文件（决策 17 的落地）
+
+一份 SQLite，表名带 `ffinfo_` 前缀免得跟 `moz_*` 撞上：
+
+| 表 | 装什么 |
+| --- | --- |
+| `ffinfo_export` | `schema_version` · 来源机器 · profile · 导出时间 · WAL 状态 · 计数 |
+| `ffinfo_visits` | 本地访问 |
+| `ffinfo_records` | 云端加密记录（原样搬，不解密） |
+| `ffinfo_cursors` | 每个 collection 的同步游标 |
+
+读的一方负责校验：**不是我们的文件 / schema 版本不认识 → 拒收**；
+**条数对不上账 / WAL 没带出来 → 收下但必须把告警交出去**，不静默接受。
+有人直接把 Firefox 的 `places.sqlite` 拷过来时，当场告诉他 `-wal` 的坑在哪。
+
+导入时三样东西各按各的规矩合并：本地访问按 `(机器, url, 时刻)` 认（重复导入幂等）；
+云端记录**只在导出的那条更新时才覆盖**（不拿旧数据盖新数据）；游标**只往前推**。
+
+#### 表单：两条出路，首版选 A
+
+云端 `forms` 永远不拉（白名单挡着，见 §3.7）；本地 `formhistory.sqlite` 是另一回事
+（来源清楚），但会让"双源"模型出现单边特例 —— 首版**降级跳过**，进 TODO。
+
+#### 实测（2026-09-14，真账号）
+
+| 检查 | 结果 |
+| --- | --- |
+| 云端 | 4907 条记录 / 12139 次访问 |
+| 导入一条"与云端同一次访问"的本地记录后 | `matched` 11420 → **11421** —— 只多了本地独有的那条，**重合的没有重复** |
+| 重合那条的标记 | `source: "both"`，带云端 `record_id` 与本地机器名 |
+| 重复导入同一份文件 | `visits_inserted: 0` / `visits_skipped: 2` —— 幂等 |
+
+---
+
 ### 3.8 生态现状
 
 | 事实 | 出处 |
