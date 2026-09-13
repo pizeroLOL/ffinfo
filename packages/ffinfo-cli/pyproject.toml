@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-ffinfo = "ffinfo_cli.cli:app"
+ffinfo-cli = "ffinfo_cli.cli:app"
 
 [tool.uv.sources]
 ffinfo = { workspace = true }

@@ -13,7 +13,7 @@ from ffinfo_cli.login import login_sync
 from ffinfo_cli.paths import credentials_path, identity_path
 
 app = typer.Typer(
-    name="ffinfo_cli",
+    name="ffinfo-cli",
     help="把 Firefox 浏览数据（云端 Sync + 本地 places.sqlite）拉到本地 SQLite，输出 JSON。",
     no_args_is_help=True,
     add_completion=False,
@@ -22,7 +22,7 @@ app = typer.Typer(
 
 def _version_callback(value: bool) -> None:
     if value:
-        typer.echo(f"ffinfo {__version__}")
+        typer.echo(f"ffinfo-cli {__version__}")
         raise typer.Exit
 
 

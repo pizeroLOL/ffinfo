@@ -56,7 +56,7 @@
 | 12 | 本地 **SQLite** · 双源**分表** · 查询时合并 · **保留来源标记** | 不强行合并，保留"这条是哪台机器看的" |
 | 13 | **age** 加密 · `age-keygen` 生成专用密钥 | 存 `~/.config/ffinfo/age-key.txt` |
 | 14 | **权限校验写进代码** | 不是 `0600` 就拒绝启动 —— 拒绝"默默不安全" |
-| 15 | 增量：**显式 `ffinfo sync`** + 超期提示 | 查询保持纯本地、瞬时 |
+| 15 | 增量：**显式 `ffinfo-cli sync`** + 超期提示 | 查询保持纯本地、瞬时 |
 
 ### 2.4 接口与工程
 
@@ -303,7 +303,7 @@ cd application-services && git sparse-checkout set components/places components/
 ```
 
 **测试策略**：逻辑全 TDD + 官方测试向量；网络层只做少量集成测试。
-**验收标准**：`ffinfo sync` 能从真实账号拉到数据并解密成功，`ffinfo list --json` 输出可被 agent 消费。
+**验收标准**：`ffinfo-cli sync` 能从真实账号拉到数据并解密成功，`ffinfo-cli list --json` 输出可被 agent 消费。
 
 ---
 

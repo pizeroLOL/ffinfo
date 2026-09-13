@@ -14,7 +14,7 @@
 
 ```bash
 uv sync
-uv run ffinfo --help
+uv run ffinfo-cli --help
 ```
 
 ## 开发
