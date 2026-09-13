@@ -1,9 +1,9 @@
-"""age 加密的凭据存储（02 号 ticket）。
+"""age 加密的凭据存储。
 
 **库不知道任何默认路径** —— 私钥与凭据的落点全部由调用者注入（``docs/design.md`` §2.5），
 默认位置只在 CLI 层决定。
 
-用 pyrage 而不是外部 ``age`` 二进制：不要求用户预装东西（ticket 02 的技术选型）。
+用 pyrage 而不是外部 ``age`` 二进制：不要求用户预装东西。
 """
 
 from __future__ import annotations

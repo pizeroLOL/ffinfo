@@ -1,4 +1,4 @@
-"""Mozilla 账号的 OAuth 2.0 授权（oob 模式）—— 03 号 ticket。
+"""Mozilla 账号的 OAuth 2.0 授权（oob 模式）。
 
 **密码永不经过本库**：授权全程在 accounts.firefox.com 的网页上完成，
 本库只经手授权码 —— 代码层面没有任何地方能接触到密码。
@@ -159,7 +159,7 @@ class OAuthTokens(BaseModel):
 class CodeReceiver(Protocol):
     """授权码怎么到手 —— 现在是"用户复制地址栏 URL"，将来可以换 localhost 回调。
 
-    OAuth 流程只依赖这个协议，换实现不用改上层（03 号 ticket 的要求）。
+    OAuth 流程只依赖这个协议，换实现不用改上层。
     """
 
     def receive(self, authorization_url: str) -> str:
@@ -335,7 +335,7 @@ class Credentials(BaseModel):
         return now >= self.expires_at
 
     def sync_key_bundle(self) -> KeyBundle:
-        """oldsync 的同步密钥 —— 03 号 ticket 的终点。"""
+        """oldsync 的同步密钥 —— OAuth 流程的终点。"""
         scoped = self.scoped_keys.get(OLD_SYNC_SCOPE)
         if scoped is None:
             msg = "这份凭据里没有 oldsync scope 的密钥"

@@ -1,4 +1,4 @@
-"""``ffinfo-cli sync``（04 号 ticket）：白名单、落盘、失败不写库。
+"""``ffinfo-cli sync``：白名单、落盘、失败不写库。
 
 全部离线：HTTP 走 ``httpx.MockTransport``，凭据写进临时目录。
 """

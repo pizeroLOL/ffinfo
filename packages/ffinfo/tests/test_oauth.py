@@ -1,4 +1,4 @@
-"""OAuth oob 授权流程（03 号 ticket）。
+"""OAuth oob 授权流程。
 
 全部离线可测：PKCE、授权 URL、回调解析都是纯函数；token 交换用
 ``httpx.MockTransport`` 打桩，不打真实网络。

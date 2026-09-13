@@ -1,4 +1,4 @@
-"""age 凭据存储（02 号 ticket）。
+"""age 凭据存储。
 
 测试打在 :class:`~ffinfo.credentials.AgeIdentity` 与
 :class:`~ffinfo.credentials.CredentialStore` 的公开边界上，用真的文件系统（``tmp_path``），

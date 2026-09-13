@@ -1,4 +1,4 @@
-"""本地落盘（04 号 ticket）：piccolo 表、整体替换、幂等。
+"""本地落盘：piccolo 表、整体替换、幂等。
 
 全部用临时目录 —— 不碰 ``~/.local/share/ffinfo-cli`` 里的真库。
 """
@@ -75,7 +75,7 @@ async def test_tombstones_are_not_stored(tmp_path: Path) -> None:
 
 
 async def test_payload_is_stored_verbatim(tmp_path: Path) -> None:
-    """04 号 ticket 的硬要求：加密原文一个字节都不动。"""
+    """硬要求：加密原文一个字节都不动。"""
     engine = await open_database(tmp_path / "db.sqlite")
     encrypted = '{"ciphertext":"AAAA","IV":"BBBB","hmac":"CCCC"}'
 
@@ -140,7 +140,7 @@ async def test_replace_collection_accepts_empty(tmp_path: Path) -> None:
     assert await SyncRecord.count() == 0
 
 
-# ── 对账：全量之后什么没了（18 号） ───────────────────────────────────────
+# ── 对账：全量之后什么没了 ───────────────────────────────────────
 
 
 async def test_full_replace_reports_deleted_and_updated(tmp_path: Path) -> None:
@@ -171,7 +171,7 @@ async def test_full_replace_reports_deleted_and_updated(tmp_path: Path) -> None:
     assert applied.total == 4  # 前后并集 {a,b,c,d}
 
 
-# ── 不变式：库里有行 ⇔ 记录存在（18 号） ─────────────────────────────────
+# ── 不变式：库里有行 ⇔ 记录存在 ─────────────────────────────────
 
 
 async def test_duplicate_ids_in_one_batch_are_folded(tmp_path: Path) -> None:

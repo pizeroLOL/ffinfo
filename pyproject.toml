@@ -16,11 +16,15 @@ members = ["packages/*"]
 ffinfo = { workspace = true }
 ffinfo-cli = { workspace = true }
 
-# ── 国内镜像（显著加速；开源发布前请改为可选/环境变量）──────
-[[tool.uv.index]]
-name = "aliyun"
-url = "https://mirrors.aliyun.com/pypi/simple/"
-default = true
+# ── 国内加速（可选，默认关）──────────────────────────────────────
+# 默认走 PyPI —— 别人 clone 下来不该被引到某个特定镜像。
+# 国内网络想显著加速，二选一（都别提交）：
+#   1. 环境变量：export UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple/
+#   2. 本地把下面三行取消注释
+# [[tool.uv.index]]
+# name = "aliyun"
+# url = "https://mirrors.aliyun.com/pypi/simple/"
+# default = true
 
 [tool.uv]
 package = false

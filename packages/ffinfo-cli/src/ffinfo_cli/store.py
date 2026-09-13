@@ -388,7 +388,7 @@ async def store_local_visits(engine: SQLiteEngine, visits: Sequence[StoredVisit]
     """写入本地访问。**幂等** —— 同一份导出再导一次，条数不会翻倍。
 
     认"同一次访问"靠 ``(machine, url, visited_at)``：那个自增主键在"删了重插"之后会
-    重排（04 号 ticket 实测），拿它当身份会串行。同一批里重复出现的也在这里顺手去重。
+    重排（实测），拿它当身份会串行。同一批里重复出现的也在这里顺手去重。
 
     标题变了算 ``updated``（Firefox 会改标题，那是同一次访问，不该多出一行）。
     """

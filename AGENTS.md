@@ -13,7 +13,7 @@
 | `packages/ffinfo-cli` | CLI：本地 SQLite · 双源合并 · export/import · JSON 输出 |
 
 **完整设计与决策见 [`docs/design.md`](docs/design.md)** —— 开工前先读它。
-那份文档是**自包含**的：19 条决策、每条技术事实都带源码出处，读它一份就能接手。
+那份文档是**自包含**的：20 条决策、每条技术事实都带源码出处，读它一份就能接手。
 
 ## 开发命令
 
@@ -30,6 +30,9 @@ uv run prek install                       # 装 git 钩子
 > pyright 会向上遍历目录找 `pyrightconfig.json`，**优先于**本地的 `pyproject.toml`。
 > 如果祖先目录里恰好有一个，裸跑 `pyright` 会去扫别人的代码。
 > 在干净的环境里裸跑没问题，但带上参数永远安全。
+>
+> ⚠️ **已知问题：这条命令目前实际分析 0 个文件**（`include` 里的通配 pyright 不认），
+> 所以「0 errors」是空的 —— 别拿它当类型安全的证据。修法见 `docs/design.md` §8。
 
 > **git 钩子用 [prek](https://github.com/j178/prek)** —— pre-commit 的 Rust 替代，
 > 读同一份 `.pre-commit-config.yaml`。ruff / ruff-format / pyright 都走 **local 钩子**：

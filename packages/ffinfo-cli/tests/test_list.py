@@ -1,7 +1,7 @@
-"""``ffinfo-cli list``（05 号 ticket）：解密、过滤、JSON 输出。
+"""``ffinfo-cli list``：解密、过滤、JSON 输出。
 
 全程不联网：库是临时目录里现造的，密文用本库自己的加密方向生成
-（加密方向已由 01 号 ticket 对着官方向量逐字节验过）。
+（加密方向已对着官方向量逐字节验过）。
 """
 
 from __future__ import annotations
@@ -278,7 +278,7 @@ async def test_tombstones_are_not_listed(tmp_path: Path) -> None:
 
 
 async def test_broken_record_is_skipped_and_counted(tmp_path: Path) -> None:
-    """ticket 05 的硬要求：一条被篡改，不该让你看不到另外两条。"""
+    """硬要求：一条被篡改，不该让你看不到另外两条。"""
     broken = EncryptedBso(
         id="broken",
         modified=2.0,
@@ -472,7 +472,7 @@ def test_matches_search_covers_several_fields_case_insensitively() -> None:
     assert not matches_search(None, None, needle="rust")
 
 
-# ── 双源合并（08 号 ticket） ───────────────────────────────────────────────
+# ── 双源合并 ───────────────────────────────────────────────
 
 
 def local_visit(
@@ -646,7 +646,7 @@ async def test_json_shape_of_a_merged_row(tmp_path: Path) -> None:
     }
 
 
-# ── 书签（16 号） ─────────────────────────────────────────────────────────
+# ── 书签 ─────────────────────────────────────────────────────────
 
 
 async def test_bookmarks_keep_the_tree(tmp_path: Path) -> None:
@@ -762,7 +762,7 @@ async def test_bookmark_json_is_serializable_with_iso_times(tmp_path: Path) -> N
     assert payload["tree"][0]["children"][0]["added_at"] == "2026-09-13T12:00:00+00:00"
 
 
-# ── 标签页（16 号） ───────────────────────────────────────────────────────
+# ── 标签页 ───────────────────────────────────────────────────────
 
 
 async def test_tabs_are_grouped_by_client(tmp_path: Path) -> None:

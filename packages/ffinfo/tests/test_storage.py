@@ -1,4 +1,4 @@
-"""Sync 存储协议：Hawk 签名、分页、退避（04 号 ticket）。
+"""Sync 存储协议：Hawk 签名、分页、退避。
 
 全部离线可测：Hawk 那条用的是 **rust-hawk 自己的测试向量**
 （app-services ``rc_crypto/src/hawk_crypto.rs`` 里逐字抄过来的），
@@ -409,7 +409,7 @@ async def test_incremental_pages_keep_newer_on_every_page() -> None:
 
 
 async def test_records_are_left_encrypted() -> None:
-    """04 号 ticket 的硬要求：拉下来的 payload 原样保留，不解密。"""
+    """硬要求：拉下来的 payload 原样保留，不解密。"""
     fake = FakeSync()
     encrypted = json.dumps({"ciphertext": "AAAA", "IV": "BBBB", "hmac": "CCCC"})
     fake.pages = [page([{"id": "a", "modified": 1.0, "payload": encrypted}])]
@@ -708,7 +708,7 @@ def test_encrypted_bso_ignores_unknown_fields() -> None:
     assert record.sortindex == 5
 
 
-# ── 翻页进度（12 号 ticket） ──────────────────────────────────────────────
+# ── 翻页进度 ──────────────────────────────────────────────
 
 
 async def test_progress_callback_fires_once_per_page() -> None:

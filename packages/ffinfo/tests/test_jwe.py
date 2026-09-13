@@ -1,4 +1,4 @@
-"""keys_jwe 解密（03 号 ticket 里「拿到 scoped key」那一环）。
+"""keys_jwe 解密（OAuth 流程里「拿到 scoped key」那一环）。
 
 官方向量：一条真实 ``keys_jwe`` + 一把固定 P-256 私钥，出自 fxa-client 的
 ``scoped_keys.rs::test_flow``。算法是 ECDH-ES（直接模式）+ Concat KDF + A256GCM。

@@ -1,4 +1,4 @@
-"""浏览历史记录的解析与解密（05 号 ticket）。
+"""浏览历史记录的解析与解密。
 
 Sync 里的历史记录长这样（``places/src/history_sync/record.rs``）::
 
@@ -161,7 +161,7 @@ def decrypt_history(records: Iterable[tuple[str, str | None]], key: KeyBundle) -
 
     ``records`` 是 ``(记录 id, payload)``；``payload`` 为 ``None`` 表示墓碑。
 
-    **单条失败只跳过并记下来**（ticket 05 的硬要求）——
+    **单条失败只跳过并记下来** ——
     一条被篡改的记录不该让你看不到另外四千条。
     """
     batch = decrypt_records(

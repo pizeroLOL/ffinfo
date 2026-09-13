@@ -1,6 +1,6 @@
-"""历史记录的解析与解密（05 号 ticket）。
+"""历史记录的解析与解密。
 
-密文是**用本库自己的加密方向现造的** —— 加密方向已经由 01 号 ticket 对着官方向量
+密文是**用本库自己的加密方向现造的** —— 加密方向已经对着官方向量
 逐字节验过了，所以拿它造测试数据是可信的。
 """
 
@@ -154,7 +154,7 @@ def test_history_record_model_directly() -> None:
 
 
 def test_one_bad_record_does_not_kill_the_batch() -> None:
-    """ticket 05 的硬要求：一条被篡改的记录，不该让你看不到另外两条。"""
+    """硬要求：一条被篡改的记录，不该让你看不到另外两条。"""
     good = encrypt(record_json(record_id="good"))
     broken = json.dumps({"IV": "AAAA", "hmac": "00" * 32, "ciphertext": "AAAA"})
 

@@ -1,4 +1,4 @@
-"""本地 places.sqlite（08 号 ticket）：profile 定位。
+"""本地 places.sqlite：profile 定位。
 
 **全部在 Linux 上跑三平台的分支** —— 所以 ``home`` / ``platform`` / ``env``
 都是参数，函数自己不读 ``Path.home()`` 和 ``sys.platform``。否则 macOS / Windows

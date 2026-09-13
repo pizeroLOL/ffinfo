@@ -15,12 +15,15 @@
 
 ---
 
-## 1. 项目结构：两个 repo
+## 1. 项目结构：两个包，一个仓
 
-| | repo | 职责 | 依赖 |
+| | 包 | 职责 | 依赖 |
 |---|---|---|---|
-| **A** | `ffinfo` | 纯 Python Firefox Sync 客户端库：OAuth 认证 · 密钥派生 · 记录解密 · 存储协议 | — |
-| **B** | `pizero-firefox-info-cli`（PyPI: `ffinfo-cli`） | CLI · 本地 SQLite · 双源合并 · `export`/`import` | → `ffinfo` |
+| **A** | `packages/ffinfo`（PyPI: `ffinfo`） | 纯 Python Firefox Sync 客户端库：OAuth 认证 · 密钥派生 · 记录解密 · 存储协议 | — |
+| **B** | `packages/ffinfo-cli`（PyPI: `ffinfo-cli`） | CLI · 本地 SQLite · 双源合并 · `export`/`import` | → `ffinfo` |
+
+物理上是一个 **uv workspace 单仓**：两个包各有自己的 `pyproject.toml`（可各自独立发布），
+仓库根只是把它们拉成依赖的壳 —— 这样裸 `uv sync` 就能装全。
 
 **为什么这样切**：官方那个 Python Sync 客户端（`mozilla-services/syncclient`）**2019 年就归档了**，至今没有任何替代品。`ffinfo` 单独成库本身就是市面上的稀缺品。
 
@@ -431,7 +434,8 @@ cd application-services && git sparse-checkout set components/places components/
 ```
 
 **测试策略**：逻辑全 TDD + 官方测试向量；网络层只做少量集成测试。
-**验收标准**：`ffinfo-cli sync` 能从真实账号拉到数据并解密成功，`ffinfo-cli list --json` 输出可被 agent 消费。
+**验收标准**：`ffinfo-cli sync` 能从真实账号拉到数据并解密成功，`ffinfo-cli list` 输出可被 agent 消费
+（`list` 恒输出 JSON，没有 `--json` 这个开关 —— 见 `README.md` 的退出码与错误契约）。
 
 ---
 
@@ -441,3 +445,5 @@ cd application-services && git sparse-checkout set components/places components/
 |---|---|---|
 | A | 如果 `forms` 确认已死 —— 降级跳过，还是另想办法？ | ❓ |
 | B | `research/` 的 47M 克隆 —— 开工后保留还是删除？ | ❓ |
+| C | **pyright 实际在空跑**：`include = ["packages/*/src", …]` 这种通配 pyright 不认，`filesAnalyzed: 0`，所以历史上所有「0 errors」都是空的。写死目录真跑一遍：src 共 89 条 —— pyrage 无存根 43 · piccolo 无存根 32 · httpx / pydantic 的写法导致的假阳性 8 · 零散 6，**没有一条是真错**。修法二选一：给 unknown 系列按文件开豁免（快、strict 打折），或补依赖存根（治本、活多）。不管哪条，`include` 该先修 | ❓ |
+| D | Python 版本策略：现在 `requires-python = ">=3.14"` 且真用了 PEP 758。库的卖点是「官方客户端归档后市面唯一替代品」—— 锁死在 3.14 等于掐死卖点；放宽要改写那处语法 | ❓ |

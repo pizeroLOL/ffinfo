@@ -1,7 +1,7 @@
-"""Sync 存储协议：tokenserver 取凭证 → Hawk 签名 → 分页拉取（04 号 ticket）。
+"""Sync 存储协议：tokenserver 取凭证 → Hawk 签名 → 分页拉取。
 
 这一层**不解密任何东西** —— 拉下来的就是服务器上的加密原文
-（``{"ciphertext","IV","hmac"}`` 字符串，见 ``docs/design.md`` §3.2）。解密是 05 号的事。
+（``{"ciphertext","IV","hmac"}`` 字符串，见 ``docs/design.md`` §3.2）。解密是上层的事。
 
 要打**两层** HTTP，别混：
 

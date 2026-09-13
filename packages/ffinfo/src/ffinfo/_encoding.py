@@ -3,7 +3,7 @@
 同步协议里两种数据的错误语义不同，上层要分开处理：
 
 * **密钥材料**坏掉 → :class:`~ffinfo.errors.KeyDerivationError` —— 整体失败，没救
-* **记录**坏掉 → :class:`~ffinfo.errors.DecryptionError` —— 单条跳过并计数（见 05 号 ticket）
+* **记录**坏掉 → :class:`~ffinfo.errors.DecryptionError` —— 单条跳过并计数
 
 所以这里**成对**提供解码器，让调用点一眼看出拿到的是哪种语义，
 而不是把异常类型当参数传进来。

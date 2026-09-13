@@ -1,6 +1,6 @@
 """密钥层次：scoped key（OAuth 的产物）→ 同步 KeyBundle → 各 collection 的 KeyBundle。
 
-这一层是 01 号 ticket 的"密钥派生链"，链路是：
+这一层是"密钥派生链"（``docs/design.md`` §3.2），链路是：
 
     keys_jwe 解密后的 JSON → ScopedKey.k（64 字节 kSync）→ KeyBundle
         → 用它解开 crypto/keys 记录 → 得到 default 与各 collection 的 KeyBundle

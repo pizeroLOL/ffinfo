@@ -1,4 +1,4 @@
-"""export / import 的编排（08 号 ticket）。
+"""export / import 的编排。
 
 这里测的是**端到端的那条路**：源机器有 Firefox → ``export`` 出便携文件 →
 拷到目标机器 → ``import`` 进本地库 → ``list`` 查得到。中间每个零件都有自己的
