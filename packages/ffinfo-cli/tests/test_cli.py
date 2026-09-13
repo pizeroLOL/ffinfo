@@ -20,6 +20,7 @@ from ffinfo.errors import (
     KeyDerivationError,
     SyncProtocolError,
 )
+from ffinfo.oauth import Credentials
 from ffinfo_cli.cli import app, error_payload
 
 runner = CliRunner()
@@ -92,3 +93,24 @@ def test_missing_credentials_is_configuration_exit_3(
     error = json.loads(result.stderr)["error"]
     assert error["code"] == "configuration"
     assert "私钥" in error["message"] or "凭据" in error["message"]
+
+
+def test_login_without_oldsync_keys_is_auth_exit_4(monkeypatch: pytest.MonkeyPatch) -> None:
+    """登录成功、但 keys_jwe 里没有 oldsync scope —— 拿不到密钥也是认证失败。
+
+    这一步曾经漏在契约外面：``sync_key_bundle()`` 抛 ``AuthError`` 没人接，
+    变成 traceback + 退出码 1，把 README 那张表破掉一格。
+    """
+    credentials = Credentials(access_token="ACCESS-TOKEN", scope="profile", expires_at=1_000.0)
+
+    def fake_login(**_kwargs: object) -> Credentials:
+        return credentials
+
+    monkeypatch.setattr("ffinfo_cli.cli.login_sync", fake_login)
+
+    result = runner.invoke(app, ["login"])
+
+    assert result.exit_code == 4
+    error = json.loads(result.stderr)["error"]
+    assert error["code"] == "auth"
+    assert "oldsync" in error["message"]

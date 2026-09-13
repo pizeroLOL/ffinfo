@@ -15,6 +15,7 @@ from typing import Any, Final, NoReturn
 
 import typer
 
+from ffinfo.crypto import KeyBundle
 from ffinfo.errors import (
     AuthError,
     BackoffError,
@@ -130,14 +131,21 @@ def main(
     """ffinfo_cli —— Firefox 数据到本地 SQLite 的搬运工。"""
 
 
+def _login() -> KeyBundle:
+    """登录并取出同步密钥 —— **两步都在契约里**。
+
+    ``sync_key_bundle()`` 缺 oldsync scope 时抛 ``AuthError``（拿不到密钥同样是认证失败）。
+    漏在 ``_guard`` 外面就变成 traceback + 退出码 1，把 README 那张表破掉一格。
+    """
+    credentials = login_sync(identity_path=identity_path(), credentials_path=credentials_path())
+    return credentials.sync_key_bundle()
+
+
 @app.command()
 def login() -> None:
     """登录 Mozilla 账号：在浏览器里授权，密码不经过本工具。"""
-    credentials = _guard(
-        lambda: login_sync(identity_path=identity_path(), credentials_path=credentials_path())
-    )
+    bundle = _guard(_login)
 
-    bundle = credentials.sync_key_bundle()
     typer.echo()
     typer.echo(
         "登录成功 —— 同步密钥已就绪"
