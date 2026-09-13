@@ -46,7 +46,7 @@ from ffinfo.errors import ConfigurationError, DecryptionError
 from ffinfo.history import HistoryEntry, decrypt_history, visit_type_name
 from ffinfo.keys import CollectionKeys
 from ffinfo.tabs import ClientTabs, TabEntry, parse_tabs
-from ffinfo_cli._time import to_microseconds
+from ffinfo.timestamps import to_microseconds
 from ffinfo_cli.store import StoredVisit, load_local_visits, load_records, open_database
 from ffinfo_cli.sync import load_credentials
 
@@ -295,7 +295,7 @@ def _merge_history(
 
     **认"同一次访问"靠 ``(url, 微秒)``。** 云端那条的时刻来自记录里的 ``date``，
     本地那条来自 ``moz_historyvisits.visit_date`` —— 两边都是 PRTime 微秒，
-    所以只要换算不引入误差，它们就能精确对上。这也是 ``_time`` 里坚持走整数运算的原因：
+    所以只要换算不引入误差，它们就能精确对上。这也是 ``ffinfo.timestamps`` 里坚持走整数运算的原因：
     差 1 微秒，同一次访问就会出两行。
     """
     merged: dict[tuple[str, int], _MergedVisit] = {}

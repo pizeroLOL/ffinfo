@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Final
 
 from ffinfo.errors import ConfigurationError
-from ffinfo_cli._time import from_microseconds, to_microseconds
+from ffinfo.timestamps import from_microseconds, to_microseconds
 
 __all__ = [
     "PLACES_FILENAME",

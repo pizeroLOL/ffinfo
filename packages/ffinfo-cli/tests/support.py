@@ -44,7 +44,7 @@ Visit = tuple[str, str | None, int, int]
 def us_of(moment: datetime) -> int:
     """UTC ``datetime`` → 微秒。
 
-    **故意不复用产品代码的 ``_time.to_microseconds``** —— 合并两个源靠的就是时间戳
+    **故意不复用产品代码的 ``timestamps.to_microseconds``** —— 合并两个源靠的就是时间戳
     逐微秒相等，测试里的换算得是独立的一份，否则它只是在验证自己。
     """
     return int(moment.timestamp() * US)

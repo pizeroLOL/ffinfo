@@ -26,13 +26,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import ClassVar, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from ffinfo._decrypt import decrypt_records, single
 from ffinfo.crypto import KeyBundle
+from ffinfo.timestamps import from_milliseconds
 
 __all__ = [
     "BookmarkNode",
@@ -43,7 +44,6 @@ __all__ = [
     "parse_bookmarks",
 ]
 
-_MILLISECONDS: Final = 1_000
 
 _DUPLICATE_REASON: Final = "id 重复 —— 同一 id 出现多次，保留最后一条"
 _CYCLE_REASON: Final = "父链成环 —— 环里的节点到不了任何根，整环丢弃"
@@ -67,11 +67,10 @@ class BookmarkRecord(BaseModel):
 
     @property
     def added_at(self) -> datetime | None:
-        """添加时间（UTC）。``dateAdded`` 是**毫秒** —— 整数运算，不走浮点。"""
+        """添加时间（UTC）。``dateAdded`` 是**毫秒**。"""
         if self.date_added is None:
             return None
-        seconds, millis = divmod(self.date_added, _MILLISECONDS)
-        return datetime.fromtimestamp(seconds, tz=UTC).replace(microsecond=millis * 1_000)
+        return from_milliseconds(self.date_added)
 
 
 class BookmarkNode(BaseModel):

@@ -23,13 +23,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import ClassVar, Final
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ffinfo._decrypt import decrypt_records
 from ffinfo.crypto import KeyBundle
+from ffinfo.timestamps import from_microseconds
 
 __all__ = [
     "VISIT_TYPES",
@@ -63,8 +64,6 @@ for meta data updates"），但它确实会出现在同步记录里。我们照�
 要不要算进"浏览历史"由消费方决定。
 """
 
-_MICROSECONDS: Final = 1_000_000
-
 
 def visit_type_name(visit_type: int) -> str:
     """访问类型的名字；没见过的取值返回 ``unknown``。"""
@@ -84,9 +83,8 @@ class HistoryVisit(BaseModel):
 
     @property
     def visited_at(self) -> datetime:
-        """访问时间，UTC。**整数运算，不走浮点** —— 双源合并靠微秒逐位相等。"""
-        seconds, micros = divmod(self.date, _MICROSECONDS)
-        return datetime.fromtimestamp(seconds, tz=UTC).replace(microsecond=micros)
+        """访问时间，UTC。``date`` 是**微秒**（PRTime）。"""
+        return from_microseconds(self.date)
 
     @property
     def type_name(self) -> str:

@@ -32,13 +32,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from ffinfo._decrypt import decrypt_records
 from ffinfo.crypto import KeyBundle
+from ffinfo.timestamps import from_seconds
 
 __all__ = [
     "ClientTabs",
@@ -73,7 +74,7 @@ class Tab(BaseModel):
         """最后使用时间（UTC）。``lastUsed`` 是**秒**。"""
         if self.last_used is None:
             return None
-        return datetime.fromtimestamp(self.last_used, tz=UTC)
+        return from_seconds(self.last_used)
 
 
 class TabsRecord(BaseModel):

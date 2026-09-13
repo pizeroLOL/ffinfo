@@ -24,7 +24,7 @@ from piccolo.engine.sqlite import SQLiteEngine
 from piccolo.table import Table
 
 from ffinfo.storage import EncryptedBso
-from ffinfo_cli._time import from_microseconds, to_microseconds
+from ffinfo.timestamps import from_microseconds, to_microseconds
 from ffinfo_cli.portable import PortableCursor, PortableRecord
 
 __all__ = [
