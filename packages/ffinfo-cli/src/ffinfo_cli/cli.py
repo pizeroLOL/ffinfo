@@ -9,6 +9,7 @@ import json
 import os
 import socket
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final, NoReturn
 
@@ -95,6 +96,20 @@ def _fail_usage(message: str) -> NoReturn:
     raise typer.Exit(code=2)
 
 
+def _guard[ReportT](call: Callable[[], ReportT], *, backoff_note: str = "") -> ReportT:
+    """跑一次业务调用；失败就按契约翻译（分档退出码 + stderr 错误 JSON）。
+
+    ``backoff_note`` 追加在退避消息后面 —— 只有 sync 用（"库里没动任何东西"）。
+    """
+    try:
+        return call()
+    except BackoffError as exc:
+        # 退避不是错误，是"现在别来" —— 顺带告诉 agent 库里没动过，重试是安全的
+        _fail(exc, note=backoff_note)
+    except FfinfoError as exc:
+        _fail(exc)
+
+
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(f"ffinfo-cli {__version__}")
@@ -118,10 +133,9 @@ def main(
 @app.command()
 def login() -> None:
     """登录 Mozilla 账号：在浏览器里授权，密码不经过本工具。"""
-    try:
-        credentials = login_sync(identity_path=identity_path(), credentials_path=credentials_path())
-    except FfinfoError as exc:
-        _fail(exc)
+    credentials = _guard(
+        lambda: login_sync(identity_path=identity_path(), credentials_path=credentials_path())
+    )
 
     bundle = credentials.sync_key_bundle()
     typer.echo()
@@ -162,20 +176,18 @@ def sync(
 
     reporter = reporter_for(sys.stderr, enabled=progress)
     try:
-        report = sync_blocking(
-            identity_path=identity_path(),
-            credentials_path=credentials_path(),
-            database_path=database_path(),
-            collection=collection,
-            page_size=page_size,
-            full=full,
-            on_progress=reporter,
+        report = _guard(
+            lambda: sync_blocking(
+                identity_path=identity_path(),
+                credentials_path=credentials_path(),
+                database_path=database_path(),
+                collection=collection,
+                page_size=page_size,
+                full=full,
+                on_progress=reporter,
+            ),
+            backoff_note="。库里没动任何东西。",
         )
-    except BackoffError as exc:
-        # 退避不是错误，是"现在别来" —— 顺带告诉 agent 库里没动过，重试是安全的
-        _fail(exc, note="。库里没动任何东西。")
-    except FfinfoError as exc:
-        _fail(exc)
     finally:
         if reporter is not None:
             reporter.finish()
@@ -213,8 +225,8 @@ def list_command(
     except ConfigurationError as exc:
         _fail_usage(str(exc))
 
-    try:
-        report = list_blocking(
+    report = _guard(
+        lambda: list_blocking(
             identity_path=identity_path(),
             credentials_path=credentials_path(),
             database_path=database_path(),
@@ -224,8 +236,7 @@ def list_command(
             search=search,
             limit=limit,
         )
-    except FfinfoError as exc:
-        _fail(exc)
+    )
 
     typer.echo(report.to_json())
 
@@ -239,8 +250,8 @@ def export(
 
     会连 ``places.sqlite-wal`` 一起带走 —— 只拷主文件会静默丢掉最近的记录。
     """
-    try:
-        report = export_blocking(
+    report = _guard(
+        lambda: export_blocking(
             database_path=database_path(),
             destination=destination,
             home=Path.home(),
@@ -249,8 +260,7 @@ def export(
             machine=socket.gethostname(),
             profile_path=profile,
         )
-    except FfinfoError as exc:
-        _fail(exc)
+    )
 
     typer.echo(report.to_json())
 
@@ -260,10 +270,7 @@ def import_command(
     source: Path = _SOURCE,
 ) -> None:
     """在**目标机器**上跑：把便携文件并进本地库，查询时与云端数据合并。"""
-    try:
-        report = import_blocking(database_path=database_path(), source=source)
-    except FfinfoError as exc:
-        _fail(exc)
+    report = _guard(lambda: import_blocking(database_path=database_path(), source=source))
 
     typer.echo(report.to_json())
     for warning in report.warnings:
@@ -273,10 +280,9 @@ def import_command(
 @app.command()
 def profiles() -> None:
     """查看本地状态：探测到的 Firefox profile、目录、密钥、上次同步时间。"""
-    try:
-        report = profiles_blocking(home=Path.home(), platform=sys.platform, env=os.environ)
-    except FfinfoError as exc:
-        _fail(exc)
+    report = _guard(
+        lambda: profiles_blocking(home=Path.home(), platform=sys.platform, env=os.environ)
+    )
 
     typer.echo(report.to_json())
 
