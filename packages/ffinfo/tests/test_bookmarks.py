@@ -10,6 +10,7 @@ import json
 from ffinfo.bookmarks import (
     BookmarkNode,
     BookmarkRecord,
+    BookmarkReport,
     build_tree,
     parse_bookmarks,
 )
@@ -113,7 +114,7 @@ def test_tree_keeps_the_hierarchy() -> None:
         ),
     ]
 
-    roots = build_tree(records)
+    roots = build_tree(records).roots
 
     assert len(roots) == 1
     assert roots[0].id == "root"
@@ -127,7 +128,7 @@ def test_orphans_become_roots_instead_of_disappearing() -> None:
         BookmarkRecord(id="lost", type="bookmark", title="孤儿", parent_id="missing"),
     ]
 
-    roots = build_tree(records)
+    roots = build_tree(records).roots
 
     assert [node.id for node in roots] == ["lost"]
 
@@ -139,7 +140,91 @@ def test_folders_sort_before_bookmarks() -> None:
         BookmarkRecord(id="a", type="folder", title="aaa"),
     ]
 
-    assert [node.id for node in build_tree(records)] == ["a", "b"]
+    assert [node.id for node in build_tree(records).roots] == ["a", "b"]
+
+
+def test_self_parent_becomes_a_root_instead_of_its_own_child() -> None:
+    """自环（父亲是自己）：父亲不合法 → 当根。绝不能成为自己的孩子。"""
+    records = [BookmarkRecord(id="a", type="folder", title="自环", parent_id="a")]
+
+    result = build_tree(records)
+
+    assert [node.id for node in result.roots] == ["a"]
+    assert result.roots[0].children == []
+    assert result.dropped == ()
+
+
+def test_a_cycle_is_dropped_and_reported() -> None:
+    """环（A→B→A）：环里谁也到不了根 —— 整环丢弃，但要**报出来**，不静默。"""
+    records = [
+        BookmarkRecord(id="a", type="folder", title="A", parent_id="b"),
+        BookmarkRecord(id="b", type="folder", title="B", parent_id="a"),
+    ]
+
+    result = build_tree(records)
+
+    assert result.roots == ()
+    assert {record_id for record_id, _ in result.dropped} == {"a", "b"}
+    assert all("成环" in reason for _, reason in result.dropped)
+
+
+def test_nodes_outside_a_cycle_are_not_collateral_damage() -> None:
+    """环外的节点不连坐：父在环里的，按"父记录没同步过来"当根。"""
+    records = [
+        BookmarkRecord(id="a", type="folder", title="A", parent_id="b"),
+        BookmarkRecord(id="b", type="folder", title="B", parent_id="a"),
+        BookmarkRecord(id="child", type="bookmark", title="环外的孩子", parent_id="a"),
+    ]
+
+    result = build_tree(records)
+
+    assert [node.id for node in result.roots] == ["child"]
+    assert {record_id for record_id, _ in result.dropped} == {"a", "b"}
+
+
+def test_duplicate_ids_keep_the_last_and_report_the_rest() -> None:
+    """重复 id：后者胜（dict 语义），先前的记一笔 —— 不静默覆盖。"""
+    records = [
+        BookmarkRecord(id="dup", type="bookmark", title="先来的", url="https://first.test/"),
+        BookmarkRecord(id="dup", type="bookmark", title="后来的", url="https://last.test/"),
+    ]
+
+    result = build_tree(records)
+
+    assert [node.title for node in result.roots] == ["后来的"]
+    assert result.dropped == (("dup", "id 重复 —— 同一 id 出现多次，保留最后一条"),)
+
+
+def test_cycles_reach_the_report_as_skipped() -> None:
+    """病态记录要经 ``parse_bookmarks`` 的 ``skipped`` 走到报告层。"""
+    report = parse_bookmarks(
+        [
+            ("a", encrypt(folder_json("a", parent_id="b", title="A"))),
+            ("b", encrypt(folder_json("b", parent_id="a", title="B"))),
+        ],
+        KEY,
+    )
+
+    assert report.roots == ()
+    assert {record_id for record_id, _ in report.skipped} == {"a", "b"}
+
+
+def test_deep_trees_do_not_blow_the_stack() -> None:
+    """病态深树：``counts()`` 走的是迭代版 ``_walk``，不炸栈。"""
+    depth = 2_000
+    records = [BookmarkRecord(id="n0", type="folder", title="根")]
+    for index in range(1, depth):
+        records.append(
+            BookmarkRecord(
+                id=f"n{index}", type="folder", title=f"n{index}", parent_id=f"n{index - 1}"
+            )
+        )
+
+    result = build_tree(records)
+    report = BookmarkReport(roots=result.roots, skipped=(), tombstones=0, records=depth)
+
+    assert len(result.roots) == 1
+    assert sum(report.counts().values()) == depth
 
 
 def test_nested_parse_builds_a_real_tree() -> None:

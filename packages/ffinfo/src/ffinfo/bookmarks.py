@@ -39,6 +39,7 @@ __all__ = [
     "BookmarkNode",
     "BookmarkRecord",
     "BookmarkReport",
+    "TreeResult",
     "build_tree",
     "parse_bookmarks",
 ]
@@ -53,6 +54,9 @@ BOOKMARK_TYPES: Final[dict[str, str]] = {
 """``type`` 的取值 —— 表里没有的原样返回，不报错。"""
 
 _MILLISECONDS: Final = 1_000
+
+_DUPLICATE_REASON: Final = "id 重复 —— 同一 id 出现多次，保留最后一条"
+_CYCLE_REASON: Final = "父链成环 —— 环里的节点到不了任何根，整环丢弃"
 
 
 class BookmarkRecord(BaseModel):
@@ -95,11 +99,24 @@ class BookmarkNode(BaseModel):
 
 
 @dataclass(frozen=True, slots=True)
+class TreeResult:
+    """建树的结果：树本身 + 建树时丢掉的病态记录。
+
+    ``dropped`` 与解密失败的 ``skipped`` 汇进同一个报告口径 —— 都是
+    "这条没能出现在树里，原因在此"。
+    """
+
+    roots: tuple[BookmarkNode, ...]
+    dropped: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
 class BookmarkReport:
     """批量解密 + 建树的结果。"""
 
     roots: tuple[BookmarkNode, ...]
     skipped: tuple[tuple[str, str], ...]
+    """没能进树的记录：(id, 原因)。**解密失败 + 建树时丢掉的病态记录**都在这里。"""
     tombstones: int
     """``{"deleted": true}`` 的记录条数 —— 不是失败，是"这条被删了"。"""
 
@@ -107,7 +124,7 @@ class BookmarkReport:
     """看过的记录条数。"""
 
     def counts(self) -> dict[str, int]:
-        """每种类型各有多少个节点（不含被删的）。"""
+        """每种类型各有多少个节点（不含被删的、也不含建树时丢掉的）。"""
         tally: dict[str, int] = {}
         for node in _walk(self.roots):
             tally[node.type] = tally.get(node.type, 0) + 1
@@ -137,30 +154,73 @@ def parse_bookmarks(records: Iterable[tuple[str, str | None]], key: KeyBundle) -
             continue
         parsed.append(record)
 
+    tree = build_tree(parsed)
     return BookmarkReport(
-        roots=tuple(build_tree(parsed)),
-        skipped=tuple(skipped),
+        roots=tree.roots,
+        skipped=tuple(skipped) + tree.dropped,
         tombstones=tombstones,
         records=seen,
     )
 
 
-def build_tree(records: Iterable[BookmarkRecord]) -> list[BookmarkNode]:
+def build_tree(records: Iterable[BookmarkRecord]) -> TreeResult:
     """按 ``parentid`` 把一堆平铺的记录拼成树。
 
-    找不到父亲的（根目录本身、或者父记录没同步过来）当根节点 —— 不能因为
-    一个缺失的父亲就把整棵子树丢掉。
+    找不到父亲的（根目录本身、父记录没同步过来、**或者父亲是自己**）当根节点 ——
+    不能因为一个缺失的父亲就把整棵子树丢掉。
+
+    两种病态**不静默**，都进 :attr:`TreeResult.dropped`：
+
+    * **重复 id** —— 同一 id 出现多次时保留最后一条，先前的记一笔
+    * **环**（A→B→A）—— 环里每个节点都"有父亲"，却谁也到不了根。整个环
+      没有天然的根可认，**整环丢弃并记一笔**（不硬造结构）
+
+    环外的节点不受连坐：父在环里的，按"父记录没同步过来"处理，当根。
     """
-    nodes = {record.id: _node(record) for record in records}
+    materialized = list(records)
+
+    nodes: dict[str, BookmarkNode] = {}
+    dropped: list[tuple[str, str]] = []
+    for record in materialized:
+        if record.id in nodes:
+            dropped.append((record.id, _DUPLICATE_REASON))
+        nodes[record.id] = _node(record)
+
+    parent_of: dict[str, str] = {}
+    for node in nodes.values():
+        parent = nodes.get(node.parent_id) if node.parent_id else None
+        if parent is not None and parent.id != node.id:
+            parent_of[node.id] = parent.id
+
+    # 环检测：沿父链上溯，能走到"没有父亲"的就是好节点；本次上溯里撞见的
+    # 节点就是环 —— 环里到不了根，整环丢弃。
+    cyclic: set[str] = set()
+    settled: set[str] = set()
+    for start in nodes:
+        if start in settled:
+            continue
+        path: list[str] = []
+        seen_at: dict[str, int] = {}
+        current: str | None = start
+        while current is not None and current not in settled and current not in seen_at:
+            seen_at[current] = len(path)
+            path.append(current)
+            current = parent_of.get(current)
+        if current is not None and current in seen_at:
+            cyclic.update(path[seen_at[current] :])
+        settled.update(path)
+
     roots: list[BookmarkNode] = []
-    for record in records:
-        node = nodes[record.id]
-        parent = nodes.get(record.parent_id) if record.parent_id else None
-        if parent is None:
+    for node in nodes.values():
+        if node.id in cyclic:
+            dropped.append((node.id, _CYCLE_REASON))
+            continue
+        parent = nodes.get(node.parent_id) if node.parent_id else None
+        if parent is None or parent.id == node.id or parent.id in cyclic:
             roots.append(node)
         else:
             parent.children.append(node)
-    return sorted(roots, key=_order)
+    return TreeResult(roots=tuple(sorted(roots, key=_order)), dropped=tuple(dropped))
 
 
 def _node(record: BookmarkRecord) -> BookmarkNode:
@@ -181,9 +241,12 @@ def _order(node: BookmarkNode) -> tuple[int, str]:
 
 
 def _walk(nodes: Iterable[BookmarkNode]) -> Iterable[BookmarkNode]:
-    for node in nodes:
+    """迭代版深度优先 —— 病态深树也不会炸栈。"""
+    stack = list(reversed(list(nodes)))
+    while stack:
+        node = stack.pop()
         yield node
-        yield from _walk(node.children)
+        stack.extend(reversed(node.children))
 
 
 def _reason(exc: Exception) -> str:
