@@ -136,6 +136,19 @@ class CredentialStore:
             raise ConfigurationError(msg) from exc
 
 
+def _write_flags() -> int:
+    r"""写私有文件用的 open flags。
+
+    ⚠️ Windows 上 ``os.open`` 默认是**文本模式** —— 不加 ``os.O_BINARY``，
+    ``os.write`` 会把数据里的 ``\n`` 悄悄换成 ``\r\n``，age 密文当场报废
+    （三平台 CI 真踩过：Windows 那格整片红）。POSIX 没有这个开关，也不需要。
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_BINARY"):  # 只有 Windows 有
+        flags |= os.O_BINARY
+    return flags
+
+
 def _write_private(path: Path, data: bytes, what: str) -> None:
     """以 0600 落盘。
 
@@ -144,7 +157,7 @@ def _write_private(path: Path, data: bytes, what: str) -> None:
     """
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, _IDENTITY_MODE)
+        fd = os.open(path, _write_flags(), _IDENTITY_MODE)
     except OSError as exc:
         msg = f"写不了{what} {path}：{exc.strerror}"
         raise ConfigurationError(msg) from exc
