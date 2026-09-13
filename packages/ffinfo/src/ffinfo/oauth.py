@@ -29,7 +29,8 @@ from ffinfo.keys import OLD_SYNC_SCOPE, ScopedKey, parse_scoped_keys
 
 __all__ = [
     "FIREFOX_DESKTOP_CLIENT_ID",
-    "OLD_SYNC_READ_SCOPE",
+    "FIREFOX_IOS_CLIENT_ID",
+    "OLD_SYNC_SCOPE",
     "AuthorizationRequest",
     "CodeReceiver",
     "Credentials",
@@ -37,19 +38,29 @@ __all__ = [
     "OAuthEndpoints",
     "OAuthTokens",
     "PkcePair",
-    "firefox_desktop_redirect_uri",
+    "firefox_redirect_uri",
     "parse_callback_url",
 ]
 
-FIREFOX_DESKTOP_CLIENT_ID: Final = "5882386c6d801776"
-"""Firefox Desktop 的 ``client_id``（Mozilla 的公开常量，见 ``FxAccountsCommon.sys.mjs``）。
+FIREFOX_IOS_CLIENT_ID: Final = "1b1a3e44c54fbb58"
+"""Firefox iOS 的 ``client_id`` —— **实测能用的那个**（2026-09-14）。
 
-⚠️ 这是**借来的**身份：Mozilla 随时可能改或封（``docs/design.md`` 风险 1）。
-所以它只是给人看的默认值，:class:`OAuthClient` 仍要求显式传入，方便换成自己的。
+它在 ``oldsync`` scope 的 redirect_uri 白名单里注册了普通 HTTPS 地址
+（``https://accounts.firefox.com/oauth/success/1b1a3e44c54fbb58``），
+授权完成后授权码会出现在地址栏里，第三方工具接得住。
+
+⚠️ 仍然是**借来的**身份，Mozilla 随时可能改（``docs/design.md`` 风险 1）。
+:class:`OAuthClient` 要求显式传入，方便换成自己的。
 """
 
-OLD_SYNC_READ_SCOPE: Final = "https://identity.mozilla.com/apps/oldsync#read"
-"""只读 scope —— 本库严格只读，不写回 Mozilla。"""
+FIREFOX_DESKTOP_CLIENT_ID: Final = "5882386c6d801776"
+"""Firefox Desktop 的 ``client_id`` —— **实测用不了**，留着做对照。
+
+2026-09-14 实测：它注册的 redirect_uri 只有
+``urn:ietf:wg:oauth:2.0:oob:oauth-redirect-webchannel``（webchannel 通道）。
+第三方浏览器没有 webchannel，请求会被导向 ``/pair`` 配对流程，
+**授权码不会出现在地址栏里**。
+"""
 
 _AUTHORIZATION_ENDPOINT: Final = "https://accounts.firefox.com/authorization"
 _TOKEN_ENDPOINT: Final = "https://oauth.accounts.firefox.com/v1/token"
@@ -66,8 +77,11 @@ _ERROR_HINTS: Final[dict[str, str]] = {
 }
 
 
-def firefox_desktop_redirect_uri(client_id: str = FIREFOX_DESKTOP_CLIENT_ID) -> str:
-    """借来的 ``client_id`` 对应的回调地址 —— 就是命中白名单的那一个。"""
+def firefox_redirect_uri(client_id: str) -> str:
+    """借来的 ``client_id`` 对应的回调地址 —— 就是命中白名单的那一个。
+
+    只对注册了 HTTPS 回调的 client_id 有效（Desktop 那个只有 ``urn:`` 形式的，不适用）。
+    """
     return f"https://accounts.firefox.com/oauth/success/{client_id}"
 
 
@@ -191,7 +205,11 @@ class OAuthClient:
                 "code_challenge": pkce.challenge,
                 "code_challenge_method": "S256",
                 "access_type": "offline",
-                "keys_jwk": json.dumps(key_pair.public_jwk(), separators=(",", ":")),
+                # Mozilla 要的是 **base64url 编码后的** JWK JSON，不是原始 JSON
+                # （见 fxa-client 的 oauth.rs：`URL_SAFE_NO_PAD.encode(jwk_json)`）
+                "keys_jwk": b64url_encode(
+                    json.dumps(key_pair.public_jwk(), separators=(",", ":")).encode("utf-8")
+                ),
             }
         )
         return AuthorizationRequest(

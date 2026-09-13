@@ -77,7 +77,9 @@ class _FakeReceiver:
     def receive(self, authorization_url: str) -> str:
         self.authorization_url = authorization_url
         query = parse_qs(urlparse(authorization_url).query)
-        self.keys_jwk = json.loads(query["keys_jwk"][0])
+        raw = query["keys_jwk"][0]
+        # keys_jwk 是 base64url 编码的 JWK JSON
+        self.keys_jwk = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
         return (
             "https://accounts.firefox.com/oauth/success/x"
             f"?code={_AUTH_CODE}&state={query['state'][0]}"
@@ -99,7 +101,7 @@ def _token_handler(receiver: _FakeReceiver) -> Callable[[httpx.Request], httpx.R
             json={
                 "access_token": "access-token-abc",
                 "token_type": "bearer",
-                "scope": "https://identity.mozilla.com/apps/oldsync#read",
+                "scope": "https://identity.mozilla.com/apps/oldsync",
                 "expires_in": 3600,
                 "refresh_token": "refresh-token-xyz",
                 "keys_jwe": _jwe_for(receiver.keys_jwk, _KEYS_JSON),

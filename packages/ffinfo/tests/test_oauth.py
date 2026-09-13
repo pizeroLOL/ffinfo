@@ -31,7 +31,7 @@ from vectors import JWE
 
 CLIENT_ID = "5882386c6d801776"
 REDIRECT_URI = f"https://accounts.firefox.com/oauth/success/{CLIENT_ID}"
-SCOPE = "https://identity.mozilla.com/apps/oldsync#read"
+SCOPE = "https://identity.mozilla.com/apps/oldsync"
 STATE = "b8f3a1c9d7e5"
 
 
@@ -91,7 +91,9 @@ def test_authorization_url_carries_a_public_keys_jwk() -> None:
     request = _client().start_authorization(scopes=[SCOPE])
     params = parse_qs(urlparse(request.url).query)
 
-    jwk = json.loads(params["keys_jwk"][0])
+    # keys_jwk 是 base64url 编码的 JWK JSON（Mozilla 的格式要求）
+    raw = params["keys_jwk"][0]
+    jwk = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
     assert jwk["kty"] == "EC"
     assert jwk["crv"] == "P-256"
     assert "d" not in jwk

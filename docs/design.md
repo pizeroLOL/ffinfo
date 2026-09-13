@@ -40,6 +40,11 @@
 | 6 | 输出：**纯数据** | 不做统计、不做 TUI（都进 TODO） |
 | 7 | 真正用户：**agent（skill）** | 会再写一个类似 `bf-stats` 的 AstrBot skill 调它 |
 
+> ⚠️ **决策 5 的实测修订（2026-09-14）**：原写「用 `#read` scope，严格只读」。
+> 实测：`…/oldsync#read` **不返回 `keys_jwe`** —— FxA 只给完整的 `…/oldsync` 派发密钥。
+> 所以 scope 层面**只能是读写**。本库代码仍然严格只读（一行写操作都没有），
+> 但「能力上可写」和「能力上不可写」是两回事，不能含糊其辞。
+
 ### 2.2 认证与密钥
 
 | # | 决策 | 备注 |
@@ -229,6 +234,8 @@ struct HistoryRecord {
 | # | 风险 | 影响 | 缓解 |
 |---|---|---|---|
 | 1 | **暂用 Firefox 的 `client_id`** | 随时可能被封，所有用户同时失效；oob 交互脆弱 | 写进 TODO 去申请；把 `client_id`/`redirect_uri` 做成可配置，隔离变更 |
+| 1b | ↑ **已兑现（2026-09-14 实测）** | Desktop 的 `client_id` **根本用不了**（只注册了 webchannel 的 `urn:` redirect_uri）。改用 **Firefox iOS 的 `client_id`**（`1b1a3e44c54fbb58`）—— 它注册了普通 HTTPS 回调，授权码能落到地址栏 |
+| 1c | **`keys_jwk` 要 base64url 编码**（2026-09-14 实测） | 传原始 JSON 会被 FxA 拒（`constraints: matches`） | 已在 `oauth.py` 修正并加了回归测试 |
 | 2 | **`forms` collection 可能已死** | 数据范围里的"表单"拿不到 | `clients_engine` 对 forms 的 reset 返回 `Unsupported`，像遗留项。**需实测** |
 | 3 | **同步数据量远小于直觉** | 用户预期落差 | 已用"双源"解决 |
 | 4 | **Mozilla 无第三方 CLI 自助注册通道** | 项目无法"干净地"发布 | 同上，先本地自用 |

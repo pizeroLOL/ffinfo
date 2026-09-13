@@ -16,13 +16,13 @@ import typer
 
 from ffinfo.credentials import AgeIdentity, CredentialStore
 from ffinfo.oauth import (
-    FIREFOX_DESKTOP_CLIENT_ID,
-    OLD_SYNC_READ_SCOPE,
+    FIREFOX_IOS_CLIENT_ID,
+    OLD_SYNC_SCOPE,
     CodeReceiver,
     Credentials,
     OAuthClient,
     default_endpoints,
-    firefox_desktop_redirect_uri,
+    firefox_redirect_uri,
     parse_callback_url,
 )
 
@@ -67,12 +67,12 @@ async def run_login(
         identity.to_file(identity_path)
 
     client = OAuthClient(
-        client_id=FIREFOX_DESKTOP_CLIENT_ID,
-        redirect_uri=firefox_desktop_redirect_uri(),
+        client_id=FIREFOX_IOS_CLIENT_ID,
+        redirect_uri=firefox_redirect_uri(FIREFOX_IOS_CLIENT_ID),
         http=http,
         endpoints=default_endpoints(),
     )
-    request = client.start_authorization(scopes=[OLD_SYNC_READ_SCOPE])
+    request = client.start_authorization(scopes=[OLD_SYNC_SCOPE])
     callback_url = receiver.receive(request.url)
     code = parse_callback_url(callback_url, expected_state=request.state)
     tokens = await client.exchange_code(code=code, request=request)
