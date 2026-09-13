@@ -17,6 +17,9 @@ htmlcov/
 # 类型检查
 .pyright/
 
+# CI 日志（工作流里 tee 出来的 —— 红了才有用，别提交）
+ci-logs/
+
 # 构建
 build/
 dist/
