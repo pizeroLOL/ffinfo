@@ -26,10 +26,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import ClassVar, Final
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from ffinfo.crypto import EncryptedPayload, KeyBundle
-from ffinfo.errors import DecryptionError
+from ffinfo._decrypt import decrypt_records
+from ffinfo.crypto import KeyBundle
 
 __all__ = [
     "VISIT_TYPES",
@@ -164,31 +164,16 @@ def decrypt_history(records: Iterable[tuple[str, str | None]], key: KeyBundle) -
     **单条失败只跳过并记下来**（ticket 05 的硬要求）——
     一条被篡改的记录不该让你看不到另外四千条。
     """
-    entries: list[HistoryEntry] = []
-    skipped: list[tuple[str, str]] = []
-    tombstones = 0
-    seen = 0
-
-    for record_id, payload in records:
-        seen += 1
-        if payload is None:
-            tombstones += 1
-            continue
-        try:
-            cleartext = EncryptedPayload.from_json(payload).decrypt(key)
-            record = HistoryRecord.model_validate_json(cleartext)
-        except (DecryptionError, ValidationError) as exc:
-            skipped.append((record_id, _reason(exc)))
-            continue
-        entries.extend(record.entries(record_id=record_id))
-
-    return DecryptionReport(
-        entries=tuple(entries), skipped=tuple(skipped), tombstones=tombstones, records=seen
+    batch = decrypt_records(
+        records,
+        key,
+        model=HistoryRecord,
+        expand=lambda record, record_id: record.entries(record_id=record_id),
+        what="历史",
     )
-
-
-def _reason(exc: Exception) -> str:
-    """给跳过的那条记一个短原因 —— 别把整个堆栈塞进 JSON。"""
-    if isinstance(exc, DecryptionError):
-        return str(exc)
-    return "明文不是合法的历史记录"
+    return DecryptionReport(
+        entries=batch.items,
+        skipped=batch.skipped,
+        tombstones=batch.tombstones,
+        records=batch.records,
+    )

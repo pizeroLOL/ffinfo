@@ -35,10 +35,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field
 
-from ffinfo.crypto import EncryptedPayload, KeyBundle
-from ffinfo.errors import DecryptionError
+from ffinfo._decrypt import decrypt_records
+from ffinfo.crypto import KeyBundle
 
 __all__ = [
     "ClientTabs",
@@ -134,27 +134,15 @@ class TabsReport:
 
 def parse_tabs(records: Iterable[tuple[str, str | None]], key: KeyBundle) -> TabsReport:
     """批量解密并按设备分组。单条坏掉只跳过并记下来，不连坐。"""
-    clients: list[ClientTabs] = []
-    skipped: list[tuple[str, str]] = []
-    tombstones = 0
-    seen = 0
-
-    for record_id, payload in records:
-        seen += 1
-        if payload is None:
-            tombstones += 1
-            continue
-        try:
-            cleartext = EncryptedPayload.from_json(payload).decrypt(key)
-            record = TabsRecord.model_validate_json(cleartext)
-        except (DecryptionError, ValidationError) as exc:
-            skipped.append((record_id, _reason(exc)))
-            continue
-        clients.append(_client(record))
-
-    clients.sort(key=lambda client: client.client_name)
+    batch = decrypt_records(
+        records, key, model=TabsRecord, expand=lambda record, _id: (_client(record),), what="标签页"
+    )
+    clients = sorted(batch.items, key=lambda client: client.client_name)
     return TabsReport(
-        clients=tuple(clients), skipped=tuple(skipped), tombstones=tombstones, records=seen
+        clients=tuple(clients),
+        skipped=batch.skipped,
+        tombstones=batch.tombstones,
+        records=batch.records,
     )
 
 
@@ -175,10 +163,3 @@ def _client(record: TabsRecord) -> ClientTabs:
             for tab in record.tabs
         ),
     )
-
-
-def _reason(exc: Exception) -> str:
-    """给跳过的那条记一个短原因。"""
-    if isinstance(exc, DecryptionError):
-        return str(exc)
-    return "明文不是合法的标签页记录"

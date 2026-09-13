@@ -29,13 +29,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import ClassVar, Final
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field
 
-from ffinfo.crypto import EncryptedPayload, KeyBundle
-from ffinfo.errors import DecryptionError
+from ffinfo._decrypt import decrypt_records, single
+from ffinfo.crypto import KeyBundle
 
 __all__ = [
-    "BOOKMARK_TYPES",
     "BookmarkNode",
     "BookmarkRecord",
     "BookmarkReport",
@@ -43,15 +42,6 @@ __all__ = [
     "build_tree",
     "parse_bookmarks",
 ]
-
-BOOKMARK_TYPES: Final[dict[str, str]] = {
-    "bookmark": "书签",
-    "folder": "文件夹",
-    "livemark": "实时书签",
-    "query": "智能书签",
-    "separator": "分隔符",
-}
-"""``type`` 的取值 —— 表里没有的原样返回，不报错。"""
 
 _MILLISECONDS: Final = 1_000
 
@@ -137,34 +127,14 @@ class BookmarkReport:
 
 def parse_bookmarks(records: Iterable[tuple[str, str | None]], key: KeyBundle) -> BookmarkReport:
     """批量解密并建树。单条坏掉只跳过并记下来，不连坐。"""
-    parsed: list[BookmarkRecord] = []
-    skipped: list[tuple[str, str]] = []
-    tombstones = 0
-    seen = 0
-
-    for record_id, payload in records:
-        seen += 1
-        if payload is None:
-            tombstones += 1
-            continue
-        try:
-            cleartext = EncryptedPayload.from_json(payload).decrypt(key)
-            record = BookmarkRecord.model_validate_json(cleartext)
-        except (DecryptionError, ValidationError) as exc:
-            skipped.append((record_id, _reason(exc)))
-            continue
-        if record.deleted:
-            tombstones += 1
-            continue
-        parsed.append(record)
-
-    tree = build_tree(parsed)
+    batch = decrypt_records(records, key, model=BookmarkRecord, expand=single, what="书签")
+    tree = build_tree(batch.items)
     return BookmarkReport(
         roots=tree.roots,
-        skipped=tuple(skipped),
+        skipped=batch.skipped,
         dropped=tree.dropped,
-        tombstones=tombstones,
-        records=seen,
+        tombstones=batch.tombstones,
+        records=batch.records,
     )
 
 
@@ -252,10 +222,3 @@ def _walk(nodes: Iterable[BookmarkNode]) -> Iterable[BookmarkNode]:
         node = stack.pop()
         yield node
         stack.extend(reversed(node.children))
-
-
-def _reason(exc: Exception) -> str:
-    """给跳过的那条记一个短原因。"""
-    if isinstance(exc, DecryptionError):
-        return str(exc)
-    return "明文不是合法的书签记录"
