@@ -36,3 +36,6 @@ Thumbs.db
 *.sqlite-shm
 *.age
 age-key.txt
+
+# 本地工作材料（spec / tickets / TODO）—— 只留本地，不进版本控制
+.scratch/
