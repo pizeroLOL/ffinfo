@@ -114,18 +114,19 @@ class ListReport(BaseModel):
     sources: list[SourceName] = []
     """实际出了数据的源。只有一个时就是**降级到单源**了。"""
     skipped: int
-    """解密失败的记录条数 —— 单条坏掉不连坐。"""
+    """没能进结果的记录条数（解密失败、或建树时丢弃的病态记录）—— 单条坏掉不连坐。"""
     skipped_details: list[dict[str, str]] = []
     matched: int
-    """过滤之后剩多少条。"""
+    """过滤之后剩多少条 —— history 是访问次数、bookmarks 是书签条数、tabs 是标签页数
+    （文件夹与设备是结构，不计）。"""
     returned: int
-    """实际返回多少条（``--limit`` 之后）。"""
+    """实际返回多少条（``--limit`` 之后，口径与 ``matched`` 相同）。"""
     items: list[HistoryItem] = []
     """``history`` 用。"""
     tree: list[BookmarkNode] = []
     """``bookmarks`` 用 —— **保留层级**，不是拍平的表。"""
     counts: dict[str, int] = {}
-    """``bookmarks`` 用：各类节点各有多少。"""
+    """``bookmarks`` 用：**返回的这棵树**里各类节点各有多少（含作为结构的文件夹）。"""
     clients: list[ClientTabs] = []
     """``tabs`` 用 —— 按设备分组。"""
 
@@ -353,7 +354,12 @@ def _bookmark_report(
     search: str | None,
     limit: int | None,
 ) -> ListReport:
-    """书签：**保留树**。过滤只作用在书签上，筛空的文件夹跟着剪掉。"""
+    """书签：**保留树**。过滤只作用在书签上，筛空的文件夹跟着剪掉。
+
+    ``--limit`` 数的是**书签条数** —— 文件夹是挂书签用的结构，不占名额
+    （与 tabs 那边"设备不占名额"一个道理）。最终树、``returned`` 与
+    ``counts`` 都从同一棵树上数出来，互相自洽。
+    """
     decrypted = parse_bookmarks(records, key)
     _guard_all_failed(decrypted.records, len(decrypted.roots), len(decrypted.skipped))
 
@@ -364,19 +370,21 @@ def _bookmark_report(
             return False
         return not (search is not None and not matches_search(node.title, node.url, needle=search))
 
-    tree = _prune(decrypted.roots, keep)
-    matched = sum(1 for _ in _walk(tree))
-    returned = _truncate(_flatten(tree), limit)
+    filtered = _prune(decrypted.roots, keep)
+    bookmarks = [node for node in _flatten(filtered) if node.type != "folder"]
+    returned = _truncate(bookmarks, limit)
     kept_ids = {node.id for node in returned}
+    tree = _prune(filtered, lambda node: node.id in kept_ids)
+    not_in_tree = decrypted.skipped + decrypted.dropped
 
     return ListReport(
         **common,
-        skipped=len(decrypted.skipped),
-        skipped_details=_details(decrypted.skipped),
-        matched=matched,
+        skipped=len(not_in_tree),
+        skipped_details=_details(not_in_tree),
+        matched=len(bookmarks),
         returned=len(returned),
-        tree=_prune(decrypted.roots, lambda node: node.id in kept_ids),
-        counts=decrypted.counts(),
+        tree=tree,
+        counts=_counts(tree),
     )
 
 
@@ -485,8 +493,12 @@ def _flatten(nodes: Sequence[BookmarkNode]) -> list[BookmarkNode]:
     return out
 
 
-def _walk(nodes: Sequence[BookmarkNode]) -> list[BookmarkNode]:
-    return _flatten(nodes)
+def _counts(nodes: Sequence[BookmarkNode]) -> dict[str, int]:
+    """树上各类**节点**各有多少（含文件夹 —— 它们也是输出的一部分）。"""
+    tally: dict[str, int] = {}
+    for node in _flatten(nodes):
+        tally[node.type] = tally.get(node.type, 0) + 1
+    return tally
 
 
 async def _collection_key(engine: SQLiteEngine, root_key: KeyBundle, collection: str) -> KeyBundle:

@@ -195,8 +195,8 @@ def test_duplicate_ids_keep_the_last_and_report_the_rest() -> None:
     assert result.dropped == (("dup", "id 重复 —— 同一 id 出现多次，保留最后一条"),)
 
 
-def test_cycles_reach_the_report_as_skipped() -> None:
-    """病态记录要经 ``parse_bookmarks`` 的 ``skipped`` 走到报告层。"""
+def test_cycles_reach_the_report_as_dropped() -> None:
+    """病态记录要经 ``parse_bookmarks`` 走到报告层 —— 解密成功但没进树。"""
     report = parse_bookmarks(
         [
             ("a", encrypt(folder_json("a", parent_id="b", title="A"))),
@@ -206,7 +206,8 @@ def test_cycles_reach_the_report_as_skipped() -> None:
     )
 
     assert report.roots == ()
-    assert {record_id for record_id, _ in report.skipped} == {"a", "b"}
+    assert report.skipped == ()
+    assert {record_id for record_id, _ in report.dropped} == {"a", "b"}
 
 
 def test_deep_trees_do_not_blow_the_stack() -> None:
@@ -221,7 +222,7 @@ def test_deep_trees_do_not_blow_the_stack() -> None:
         )
 
     result = build_tree(records)
-    report = BookmarkReport(roots=result.roots, skipped=(), tombstones=0, records=depth)
+    report = BookmarkReport(roots=result.roots, skipped=(), dropped=(), tombstones=0, records=depth)
 
     assert len(result.roots) == 1
     assert sum(report.counts().values()) == depth

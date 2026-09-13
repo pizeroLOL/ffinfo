@@ -108,22 +108,84 @@ def history_record(
     )
 
 
-async def build_db(
-    tmp_path: Path, records: list[EncryptedBso], *, keys: EncryptedBso | None = None
-) -> None:
-    """把库造出来：一条 crypto/keys + 若干 history 记录。"""
-    engine = await open_database(tmp_path / "db.sqlite")
-    await store_batches(
-        engine,
-        [
-            CollectionBatch(
-                collection="crypto",
-                records=[keys if keys is not None else keys_record()],
-                full=True,
-            ),
-            CollectionBatch(collection="history", records=records, full=True),
-        ],
+ADDED_MILLIS = int(DAY.timestamp() * 1_000)
+"""书签的 ``dateAdded`` 是**毫秒** —— 跟历史（微秒）、标签页（秒）不是一个单位。"""
+
+
+def bookmark_record(
+    record_id: str,
+    *,
+    parent_id: str | None = "folder",
+    title: str = "书签",
+    url: str | None = "https://example.com/",
+    kind: str = "bookmark",
+    date_added: int | None = ADDED_MILLIS,
+    key: KeyBundle = KEY,
+) -> EncryptedBso:
+    """一条书签记录（测试里三个 collection 共用一把 ``KEY``）。"""
+    payload: dict[str, object] = {"id": record_id, "type": kind, "title": title}
+    if parent_id is not None:
+        payload["parentid"] = parent_id
+    if url is not None:
+        payload["bmkUri"] = url
+    if date_added is not None:
+        payload["dateAdded"] = date_added
+    return EncryptedBso(
+        id=record_id,
+        modified=2.0,
+        payload=EncryptedPayload.from_cleartext(key, json.dumps(payload)).to_json(),
     )
+
+
+def tabs_record(
+    record_id: str,
+    *,
+    client_name: str = "device",
+    entries: list[tuple[str, str, int]] | None = None,
+    key: KeyBundle = KEY,
+) -> EncryptedBso:
+    """一条标签页记录（一个 BSO = 一台设备）。``entries`` 是 ``(标题, URL, lastUsed 秒)``。"""
+    tabs = entries if entries is not None else [("标签页", "https://example.com/", 1_700_000_000)]
+    cleartext = json.dumps(
+        {
+            "id": record_id,
+            "clientName": client_name,
+            "tabs": [
+                {"title": title, "urlHistory": [url], "lastUsed": last_used}
+                for title, url, last_used in tabs
+            ],
+        }
+    )
+    return EncryptedBso(
+        id=record_id,
+        modified=2.0,
+        payload=EncryptedPayload.from_cleartext(key, cleartext).to_json(),
+    )
+
+
+async def build_db(
+    tmp_path: Path,
+    records: list[EncryptedBso],
+    *,
+    keys: EncryptedBso | None = None,
+    bookmarks: list[EncryptedBso] | None = None,
+    tabs: list[EncryptedBso] | None = None,
+) -> None:
+    """把库造出来：一条 crypto/keys + 若干记录（默认只有 history）。"""
+    batches = [
+        CollectionBatch(
+            collection="crypto",
+            records=[keys if keys is not None else keys_record()],
+            full=True,
+        ),
+        CollectionBatch(collection="history", records=records, full=True),
+    ]
+    if bookmarks is not None:
+        batches.append(CollectionBatch(collection="bookmarks", records=bookmarks, full=True))
+    if tabs is not None:
+        batches.append(CollectionBatch(collection="tabs", records=tabs, full=True))
+    engine = await open_database(tmp_path / "db.sqlite")
+    await store_batches(engine, batches)
 
 
 async def run(tmp_path: Path, **kwargs: object) -> object:
@@ -582,3 +644,144 @@ async def test_json_shape_of_a_merged_row(tmp_path: Path) -> None:
         "source": "both",
         "source_machine": "test-laptop",
     }
+
+
+# ── 书签（16 号） ─────────────────────────────────────────────────────────
+
+
+async def test_bookmarks_keep_the_tree(tmp_path: Path) -> None:
+    await build_db(
+        tmp_path,
+        [],
+        bookmarks=[
+            bookmark_record("folder", kind="folder", parent_id=None, title="工具", url=None),
+            bookmark_record("bmk", parent_id="folder", title="示例", url="https://example.com/"),
+        ],
+    )
+
+    report = await run(tmp_path, data_type="bookmarks")  # type: ignore[assignment]
+
+    assert [node.id for node in report.tree] == ["folder"]
+    assert report.tree[0].children[0].id == "bmk"
+    assert report.returned == 1
+    assert report.matched == 1
+    assert report.counts == {"folder": 1, "bookmark": 1}
+
+
+async def test_bookmark_limit_counts_bookmarks_not_folders(tmp_path: Path) -> None:
+    """``--limit 1`` 不能再出现 returned=1 / tree=[] 这种自相矛盾。"""
+    await build_db(
+        tmp_path,
+        [],
+        bookmarks=[
+            bookmark_record("folder", kind="folder", parent_id=None, title="工具", url=None),
+            bookmark_record("bmk", parent_id="folder", title="示例"),
+        ],
+    )
+
+    report = await run(tmp_path, data_type="bookmarks", limit=1)  # type: ignore[assignment]
+
+    assert report.returned == 1
+    assert [node.id for node in report.tree] == ["folder"]
+    assert report.tree[0].children[0].id == "bmk"  # 文件夹是挂书签的结构，不占名额
+    assert report.counts == {"folder": 1, "bookmark": 1}
+
+
+async def test_bookmark_filters_prune_empty_folders(tmp_path: Path) -> None:
+    await build_db(
+        tmp_path,
+        [],
+        bookmarks=[
+            bookmark_record("tools", kind="folder", parent_id=None, title="工具", url=None),
+            bookmark_record(
+                "keep", parent_id="tools", title="Rust 笔记", url="https://rust-lang.org/"
+            ),
+            bookmark_record("drop", parent_id="tools", title="别家", url="https://other.test/"),
+            bookmark_record("empty", kind="folder", parent_id=None, title="空文件夹", url=None),
+        ],
+    )
+
+    report = await run(tmp_path, data_type="bookmarks", domain="rust-lang.org")  # type: ignore[assignment]
+
+    assert report.returned == 1
+    assert report.matched == 1
+    assert [node.id for node in report.tree] == ["tools"]
+    assert report.tree[0].children[0].id == "keep"
+    assert report.counts == {"folder": 1, "bookmark": 1}
+
+
+async def test_bookmark_limit_uses_the_budget_on_bookmarks(tmp_path: Path) -> None:
+    await build_db(
+        tmp_path,
+        [],
+        bookmarks=[
+            bookmark_record("folder", kind="folder", parent_id=None, title="工具", url=None),
+            bookmark_record("a", parent_id="folder", title="A", url="https://a.test/"),
+            bookmark_record("b", parent_id="folder", title="B", url="https://b.test/"),
+        ],
+    )
+
+    report = await run(tmp_path, data_type="bookmarks", limit=2)  # type: ignore[assignment]
+
+    assert report.returned == 2
+    assert report.matched == 2
+    assert report.counts == {"folder": 1, "bookmark": 2}
+
+
+async def test_bookmark_cycles_reach_the_report_as_skipped(tmp_path: Path) -> None:
+    """建树时丢掉的病态记录（环）也走 ``skipped`` —— 不静默。"""
+    await build_db(
+        tmp_path,
+        [],
+        bookmarks=[
+            bookmark_record("a", kind="folder", parent_id="b", title="A", url=None),
+            bookmark_record("b", kind="folder", parent_id="a", title="B", url=None),
+        ],
+    )
+
+    report = await run(tmp_path, data_type="bookmarks")  # type: ignore[assignment]
+
+    assert report.tree == []
+    assert report.skipped == 2
+
+
+# ── 标签页（16 号） ───────────────────────────────────────────────────────
+
+
+async def test_tabs_are_grouped_by_client(tmp_path: Path) -> None:
+    await build_db(
+        tmp_path,
+        [],
+        tabs=[
+            tabs_record("dev1", client_name="alpha", entries=[("一", "https://a.test/", 1)]),
+            tabs_record("dev2", client_name="beta", entries=[("二", "https://b.test/", 2)]),
+        ],
+    )
+
+    report = await run(tmp_path, data_type="tabs")  # type: ignore[assignment]
+
+    assert [client.client_name for client in report.clients] == ["alpha", "beta"]
+    assert report.returned == 2
+    assert report.matched == 2
+
+
+async def test_tabs_limit_counts_tabs_not_clients(tmp_path: Path) -> None:
+    await build_db(
+        tmp_path,
+        [],
+        tabs=[
+            tabs_record(
+                "dev1",
+                client_name="alpha",
+                entries=[("一", "https://a.test/", 1), ("二", "https://b.test/", 2)],
+            ),
+            tabs_record("dev2", client_name="beta", entries=[("三", "https://c.test/", 3)]),
+        ],
+    )
+
+    report = await run(tmp_path, data_type="tabs", limit=2)  # type: ignore[assignment]
+
+    assert report.matched == 3
+    assert report.returned == 2
+    assert [client.client_name for client in report.clients] == ["alpha"]
+    assert [tab.title for tab in report.clients[0].tabs] == ["一", "二"]

@@ -116,7 +116,9 @@ class BookmarkReport:
 
     roots: tuple[BookmarkNode, ...]
     skipped: tuple[tuple[str, str], ...]
-    """没能进树的记录：(id, 原因)。**解密失败 + 建树时丢掉的病态记录**都在这里。"""
+    """**解密失败**的记录：(id, 原因)。"""
+    dropped: tuple[tuple[str, str], ...]
+    """**解密成功但没进树**的病态记录：(id, 原因) —— 重复 id / 父链成环。"""
     tombstones: int
     """``{"deleted": true}`` 的记录条数 —— 不是失败，是"这条被删了"。"""
 
@@ -157,7 +159,8 @@ def parse_bookmarks(records: Iterable[tuple[str, str | None]], key: KeyBundle) -
     tree = build_tree(parsed)
     return BookmarkReport(
         roots=tree.roots,
-        skipped=tuple(skipped) + tree.dropped,
+        skipped=tuple(skipped),
+        dropped=tree.dropped,
         tombstones=tombstones,
         records=seen,
     )
