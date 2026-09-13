@@ -29,12 +29,14 @@ from ffinfo_cli.portable import PortableCursor, PortableRecord
 __all__ = [
     "ApplyResult",
     "CollectionBatch",
+    "CursorInfo",
     "LocalVisitRow",
     "StoredVisit",
     "SyncCursor",
     "SyncRecord",
     "count_records",
     "load_cursor",
+    "load_cursors",
     "load_local_visits",
     "load_records",
     "merge_sync_cursors",
@@ -379,6 +381,34 @@ async def count_records(engine: SQLiteEngine, collection: str) -> int:
     """库里这个 collection 现在有多少条。"""
     _bind(engine)
     return await SyncRecord.count().where(SyncRecord.collection == collection)
+
+
+@dataclass(frozen=True, slots=True)
+class CursorInfo:
+    """一个 collection 的同步进度。"""
+
+    collection: str
+    last_modified: float
+    """服务器给的 collection 时间戳（下次增量拉取的起点）。"""
+    synced_at: float
+    """上次同步完成的时间（Unix 秒）。"""
+    records: int
+    """上次同步之后库里有多少条。"""
+
+
+async def load_cursors(engine: SQLiteEngine) -> tuple[CursorInfo, ...]:
+    """所有 collection 的同步进度 —— 没同步过的 collection 不在里面。"""
+    _bind(engine)
+    rows = await SyncCursor.select().order_by(SyncCursor.collection)
+    return tuple(
+        CursorInfo(
+            collection=str(row["collection"]),
+            last_modified=float(row["last_modified"]),
+            synced_at=float(row["synced_at"]),
+            records=int(row["records"]),
+        )
+        for row in rows
+    )
 
 
 # ── 本地源（places.sqlite 来的） ──────────────────────────────────────────

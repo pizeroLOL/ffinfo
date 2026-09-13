@@ -144,7 +144,7 @@ def find_profile(
     msg = (
         f"没找到任何 Firefox profile（找过：{searched}）。"
         f"要么这台机器上没装过 Firefox，要么 profile 不在默认位置 —— "
-        f"用 --profile <profile 目录> 直接指定。"
+        f"用 --profile <profile 目录> 直接指定（`ffinfo-cli profiles` 会把候选列出来）。"
         f"另外：本地数据得先在**有 Firefox 的机器**上 export，再 import 过来"
     )
     raise ConfigurationError(msg)

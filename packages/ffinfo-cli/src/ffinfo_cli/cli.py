@@ -27,6 +27,7 @@ from ffinfo_cli import __version__
 from ffinfo_cli.list import DATA_TYPES, list_blocking, parse_since
 from ffinfo_cli.login import login_sync
 from ffinfo_cli.paths import credentials_path, database_path, identity_path
+from ffinfo_cli.profiles import profiles_blocking
 from ffinfo_cli.progress import reporter_for
 from ffinfo_cli.sync import SYNCABLE_COLLECTIONS, sync_blocking
 from ffinfo_cli.transfer import export_blocking, import_blocking
@@ -271,9 +272,13 @@ def import_command(
 
 @app.command()
 def profiles() -> None:
-    """查看本地状态：配置目录、数据目录、密钥、上次同步时间。"""
-    typer.echo("profiles: 尚未实现", err=True)
-    raise typer.Exit(code=1)
+    """查看本地状态：探测到的 Firefox profile、目录、密钥、上次同步时间。"""
+    try:
+        report = profiles_blocking(home=Path.home(), platform=sys.platform, env=os.environ)
+    except FfinfoError as exc:
+        _fail(exc)
+
+    typer.echo(report.to_json())
 
 
 if __name__ == "__main__":
