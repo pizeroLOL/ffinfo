@@ -6,8 +6,19 @@
 设计约束：**库不持有任何默认路径**，所有 I/O 位置由调用者注入。
 """
 
+from ffsync.crypto import EncryptedPayload, KeyBundle
 from ffsync.errors import FfsyncError
+from ffsync.keys import OLD_SYNC_SCOPE, CollectionKeys, ScopedKey, parse_scoped_keys
 
 __version__ = "0.1.0"
 
-__all__ = ["FfsyncError", "__version__"]
+__all__ = [
+    "OLD_SYNC_SCOPE",
+    "CollectionKeys",
+    "EncryptedPayload",
+    "FfsyncError",
+    "KeyBundle",
+    "ScopedKey",
+    "__version__",
+    "parse_scoped_keys",
+]

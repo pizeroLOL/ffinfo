@@ -86,11 +86,14 @@ include = ["packages/*/src", "packages/*/tests"]
 pythonVersion = "3.14"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false
+# 测试向量模块（packages/ffsync/tests/vectors.py）不在包内，显式告诉 pyright 去哪找
+extraPaths = ["packages/ffsync/tests"]
 
 # ── pytest ─────────────────────────────────────────────────
 [tool.pytest.ini_options]
 testpaths = ["packages/*/tests"]
-pythonpath = ["packages/ffsync/src", "packages/ffinfo-cli/src"]
+# tests 目录也在 path 上：测试向量模块（packages/ffsync/tests/vectors.py）要能被 import
+pythonpath = ["packages/ffsync/src", "packages/ffinfo-cli/src", "packages/ffsync/tests"]
 asyncio_mode = "auto"
 # 两个包各有同名 test 文件，用 importlib 模式避免 basename 冲突
 addopts = "-ra --strict-markers --import-mode=importlib"
