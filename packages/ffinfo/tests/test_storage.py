@@ -1,6 +1,5 @@
 # pyright: reportPrivateUsage=false
-# 上面这条：Hawk 签名的两个关键步骤（_normalized_request / _parse_seconds）没有公开面，
-# 测试只能直接验它们。
+# 上面这条：Hawk 签名的关键步骤没有公开面，测试只能直接验私有函数。
 """Sync 存储协议：Hawk 签名、分页、退避。
 
 全部离线可测：Hawk 那条用的是 **rust-hawk 自己的测试向量**

@@ -185,8 +185,7 @@ class EncryptedPayload(BaseModel):
     def from_cleartext(cls, key: KeyBundle, cleartext: str) -> Self:
         """用给定密钥加密一段明文，得到 payload。"""
         ciphertext_b64, iv_b64, hmac_hex = key.encrypt(cleartext)
-        # 走 model_validate 而不是关键字参数：pyright 认不出 pydantic 的
-        # populate_by_name（它以为参数名是别名 "IV"），这里正好按线上格式构造
+        # 按线上别名构造 —— pyright 认不出 populate_by_name（它以为参数名是 "IV"）
         return cls.model_validate({"IV": iv_b64, "hmac": hmac_hex, "ciphertext": ciphertext_b64})
 
     def decrypt(self, key: KeyBundle) -> str:
