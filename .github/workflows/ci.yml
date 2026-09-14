@@ -10,8 +10,8 @@ name: CI
 #
 # **红了要有东西消费**：矩阵从加进来那天起，Windows 腿红过好几次，而没有任何东西因此停下来
 # （产出代码的 agent 跑在 Linux，全自动、天然全绿；唯一能暴露 Windows 的信号没人看）。
-# 所以：任一平台失败 → 把"哪条腿、哪一步、失败签名"写进 job summary（$GITHUB_STEP_SUMMARY）；
-# AstrBot 侧另有定时任务把失败报到对话里。别指望"人记得去看"。
+# 所以：任一平台失败 → 把"哪条腿、哪一步、失败签名"写进 job summary（$GITHUB_STEP_SUMMARY）——
+# 那是一次 run 里最该被看到的一屏，不用翻日志、也不用指望"人记得去看"。
 
 on:
   push:
