@@ -32,7 +32,7 @@ from typing import Final
 
 from ffinfo.errors import ConfigurationError
 from ffinfo.timestamps import from_microseconds, to_microseconds
-from ffinfo_cli.places import LocalVisit
+from ffinfo_cli.places import FirefoxVisit
 
 __all__ = [
     "SCHEMA_VERSION",
@@ -144,7 +144,7 @@ class PortableFile:
     """读出来的一份便携文件。``warnings`` 非空时，收之前得先看一眼。"""
 
     meta: ExportMeta
-    visits: tuple[LocalVisit, ...]
+    visits: tuple[FirefoxVisit, ...]
     records: tuple[PortableRecord, ...]
     cursors: tuple[PortableCursor, ...]
     warnings: tuple[str, ...]
@@ -154,7 +154,7 @@ def write_portable(
     path: Path,
     *,
     source: ExportSource,
-    visits: Sequence[LocalVisit] = (),
+    visits: Sequence[FirefoxVisit] = (),
     records: Sequence[PortableRecord] = (),
     cursors: Sequence[PortableCursor] = (),
     exported_at: str,
@@ -316,9 +316,9 @@ def _read_meta(connection: sqlite3.Connection) -> ExportMeta:
     )
 
 
-def _read_visits(connection: sqlite3.Connection) -> tuple[LocalVisit, ...]:
+def _read_visits(connection: sqlite3.Connection) -> tuple[FirefoxVisit, ...]:
     return tuple(
-        LocalVisit(
+        FirefoxVisit(
             url=str(row["url"]),
             title=str(row["title"]),
             visited_at=from_microseconds(int(row["visited_at_us"])),
@@ -364,7 +364,7 @@ def _read_cursors(connection: sqlite3.Connection) -> tuple[PortableCursor, ...]:
 
 
 def _warnings(
-    meta: ExportMeta, visits: tuple[LocalVisit, ...], records: tuple[PortableRecord, ...]
+    meta: ExportMeta, visits: tuple[FirefoxVisit, ...], records: tuple[PortableRecord, ...]
 ) -> tuple[str, ...]:
     """对不上账的地方 —— 每条都要能让人知道下一步干什么。"""
     found: list[str] = []

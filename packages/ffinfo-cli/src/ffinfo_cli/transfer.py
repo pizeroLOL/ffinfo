@@ -1,6 +1,6 @@
-"""``ffinfo-cli export`` / ``ffinfo-cli import`` —— 把本地历史在机器之间搬。
+"""``ffinfo-cli export`` / ``ffinfo-cli import`` —— 把 firefox 历史在机器之间搬。
 
-**为什么需要这一对命令**（设计文档决策 3）：本地 ``places.sqlite`` 才是"非常大"的那一半
+**为什么需要这一对命令**（设计文档决策 3）：firefox 的 ``places.sqlite`` 才是"非常大"的那一半
 历史（云端同步有 5000 条 / 60 天的硬上限，见 §3.1），但只有装了 Firefox 的机器才有它。
 所以在那台机器上 ``export`` 出一份便携文件，拷到目标机器 ``import`` 进去 ——
 查询时两个源合并，见 ``list.py``。
@@ -122,7 +122,7 @@ async def run_export(
     """在**有 Firefox 的机器**上跑：读 profile 的 ``places.sqlite``，写出便携文件。
 
     顺带把本地库里的云端记录与游标一起搬走 —— 这样目标机器不用为了同一批数据再拉一次。
-    库还不存在（没 login 过）也照样能 export，那就只有本地那部分。
+    库还不存在（没 login 过）也照样能 export，那就只有 firefox 那部分。
     """
     started = clock()
     profile = find_profile(home=home, platform=platform, env=env, explicit=profile_path)
@@ -171,7 +171,7 @@ async def run_import(
 
     三样东西各按各的规矩合并：
 
-    * 本地访问 —— 按 ``(机器, url, 访问时刻)`` 认，重复导入幂等
+    * firefox 访问 —— 按 ``(机器, url, 访问时刻)`` 认，重复导入幂等
     * 云端记录 —— **只在导出的那条更新时才覆盖**，不拿旧数据盖新数据
     * 同步游标 —— **只往前推**
 
@@ -182,7 +182,7 @@ async def run_import(
     portable = read_portable(source)
     store = await open_database(database_path, warn=warn)
 
-    visits = await store.store_local_visits(
+    visits = await store.store_firefox_visits(
         [
             StoredVisit(
                 machine=portable.meta.machine,

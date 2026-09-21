@@ -26,7 +26,7 @@ from ffinfo.timestamps import from_microseconds, to_microseconds
 
 __all__ = [
     "PLACES_FILENAME",
-    "LocalVisit",
+    "FirefoxVisit",
     "Profile",
     "Snapshot",
     "discover_profiles",
@@ -169,8 +169,8 @@ class Snapshot:
 
 
 @dataclass(frozen=True, slots=True)
-class LocalVisit:
-    """本地 ``places.sqlite`` 里的一次访问。"""
+class FirefoxVisit:
+    """本机 ``places.sqlite`` 里的一次访问 —— firefox 源的原始形态。"""
 
     url: str
     title: str
@@ -220,7 +220,7 @@ def snapshot_places(database: Path, *, into: Path) -> Snapshot:
     return Snapshot(directory=into, database=target, sidecars=tuple(carried), wal_bytes=wal_bytes)
 
 
-def read_visits(database: Path, *, since: datetime | None = None) -> tuple[LocalVisit, ...]:
+def read_visits(database: Path, *, since: datetime | None = None) -> tuple[FirefoxVisit, ...]:
     """读出每一次访问，按时间升序。**只读打开**，不碰源文件。
 
     ``hidden`` 的 URL 跳过 —— 那是 Firefox 自己标的"别在历史里显示"（跳转落点之类），
@@ -241,7 +241,7 @@ def read_visits(database: Path, *, since: datetime | None = None) -> tuple[Local
         raise ConfigurationError(msg) from exc
 
     return tuple(
-        LocalVisit(
+        FirefoxVisit(
             url=str(row["url"] or ""),
             title=str(row["title"] or ""),
             visited_at=from_microseconds(int(row["visit_date"])),

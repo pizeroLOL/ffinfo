@@ -257,6 +257,39 @@ async def test_old_databases_with_duplicate_rows_are_repaired(tmp_path: Path) ->
     assert "1 条重复记录" in warnings[0]
 
 
+async def test_legacy_local_visits_table_is_migrated_on_open(tmp_path: Path) -> None:
+    """老库里的 ``local_visits`` 要就地改名 —— 不然已导入的 firefox 访问会静默消失。
+
+    新表是空的没人写、旧表没人读，查询结果无声变少 —— 所以这条测试盯的是
+    "打开老库之后，数据仍然能通过新接口读出来"。
+    """
+    path = tmp_path / "old.sqlite"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE local_visits (
+            id INTEGER PRIMARY KEY,
+            machine VARCHAR(128) NOT NULL,
+            url TEXT NOT NULL,
+            title TEXT NOT NULL,
+            visited_at BIGINT NOT NULL,
+            visit_type INTEGER NOT NULL
+        );
+        INSERT INTO local_visits (machine, url, title, visited_at, visit_type)
+            VALUES ('test-laptop', 'https://a.example/', 'A', 1700000000000000, 1);
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    store = await open_database(path)
+
+    stored = await store.load_firefox_visits()
+    assert [item.url for item in stored] == ["https://a.example/"]
+    assert stored[0].machine == "test-laptop"
+    assert stored[0].title == "A"
+
+
 async def test_read_only_open_leaves_a_legacy_database_alone(tmp_path: Path) -> None:
     """``read_only=True``：不建表、不收敛 —— 库里原来什么样，打开后还是什么样。"""
     path = tmp_path / "old.sqlite"
@@ -288,7 +321,7 @@ async def test_read_only_open_leaves_a_legacy_database_alone(tmp_path: Path) -> 
     ).fetchall()
     rows = connection.execute("SELECT payload FROM sync_records ORDER BY id").fetchall()
     connection.close()
-    assert tables == [("sync_records",)]  # 没顺手建出 sync_cursors / local_visits
+    assert tables == [("sync_records",)]  # 没顺手建出 sync_cursors / firefox_visits
     assert [row[0] for row in rows] == ["old", "new"]  # 也没顺手收敛
 
 

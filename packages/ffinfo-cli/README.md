@@ -27,7 +27,11 @@ ffinfo-cli profiles             # 查看本地状态（profile、密钥、各 co
 | 源 | 上限 | 说明 |
 |---|---|---|
 | Firefox Sync | 5000 URL · 每 URL 20 visits · 60 天 | 跨设备，但量小 |
-| 本地 `places.sqlite` | 无上限 | 需要源机器有 Firefox |
+| firefox `places.sqlite` | 无上限 | 需要源机器有 Firefox |
+
+> ⚠️ **破坏性改名（`ListReport.format_version` 3 → 4）**：历史条目的 `source` 取值
+> `local` → `firefox`，`sources` 里的 `local` → `firefox`，计数字段 `local_records`
+> → `firefox_records`。消费 JSON 的调用方要跟着改。用 `format_version` 判版本。
 
 `list` 会告诉你怎么查：`synced_at` / `age_seconds` 是**数据新鲜度** ——
 从没同步过就是 `null`，不假装有数据。

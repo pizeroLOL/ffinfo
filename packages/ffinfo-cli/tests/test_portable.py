@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from ffinfo.errors import ConfigurationError
-from ffinfo_cli.places import LocalVisit
+from ffinfo_cli.places import FirefoxVisit
 from ffinfo_cli.portable import (
     SCHEMA_VERSION,
     ExportSource,
@@ -33,8 +33,8 @@ US = 1_000_000
 MOMENT = "2026-09-14T02:00:00+00:00"
 
 
-def visit(url: str, *, seconds: int = 1_700_000_000, title: str = "T") -> LocalVisit:
-    return LocalVisit(
+def visit(url: str, *, seconds: int = 1_700_000_000, title: str = "T") -> FirefoxVisit:
+    return FirefoxVisit(
         url=url,
         title=title,
         visited_at=datetime.fromtimestamp(seconds, tz=UTC),

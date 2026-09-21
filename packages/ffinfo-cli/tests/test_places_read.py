@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from ffinfo.errors import ConfigurationError
-from ffinfo_cli.places import LocalVisit, read_visits, snapshot_places
+from ffinfo_cli.places import FirefoxVisit, read_visits, snapshot_places
 from support import US, add_visits, build_places
 
 
@@ -213,9 +213,9 @@ def test_read_visits_missing_table_is_actionable(tmp_path: Path) -> None:
     assert "places.sqlite" in str(caught.value)
 
 
-def test_local_visit_is_frozen() -> None:
+def test_firefox_visit_is_frozen() -> None:
     """值对象 —— 拿到手就不该能改。"""
-    visit = LocalVisit(
+    visit = FirefoxVisit(
         url="https://a.example/",
         title="A",
         visited_at=datetime(2023, 11, 14, 22, 13, 20, tzinfo=UTC),

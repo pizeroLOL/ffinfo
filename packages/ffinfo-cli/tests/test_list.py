@@ -499,7 +499,7 @@ def test_matches_search_covers_several_fields_case_insensitively() -> None:
     assert not matches_search(None, None, needle="rust")
 
 
-def local_visit(
+def firefox_visit(
     url: str = "https://example.com/",
     *,
     when: datetime = DAY,
@@ -512,26 +512,26 @@ def local_visit(
     )
 
 
-async def add_local(tmp_path: Path, visits: list[StoredVisit]) -> None:
-    """往同一个库里写本地源 —— 分表，与 sync_records 互不干扰。"""
+async def add_firefox(tmp_path: Path, visits: list[StoredVisit]) -> None:
+    """往同一个库里写 firefox 源 —— 分表，与 sync_records 互不干扰。"""
     store = await open_database(tmp_path / "db.sqlite")
-    await store.store_local_visits(visits)
+    await store.store_firefox_visits(visits)
 
 
-async def test_local_source_alone_is_usable(tmp_path: Path) -> None:
-    """目标机器上只有 import 进来的本地数据、云端那条记录也没解出访问 —— 照样能查。"""
+async def test_firefox_source_alone_is_usable(tmp_path: Path) -> None:
+    """目标机器上只有 import 进来的 firefox 数据、云端那条记录也没解出访问 —— 照样能查。"""
     await build_db(tmp_path, [])
-    await add_local(tmp_path, [local_visit("https://local.test/")])
+    await add_firefox(tmp_path, [firefox_visit("https://firefox.test/")])
 
     report = await run(tmp_path)
 
-    assert [item.url for item in report.items] == ["https://local.test/"]
-    assert report.items[0].source == "local"
+    assert [item.url for item in report.items] == ["https://firefox.test/"]
+    assert report.items[0].source == "firefox"
     assert report.items[0].record_id is None
 
 
 async def test_sync_source_alone_still_works(tmp_path: Path) -> None:
-    """**降级到单源**：一台没导入过任何本地数据的机器，查询照常。"""
+    """**降级到单源**：一台没导入过任何 firefox 数据的机器，查询照常。"""
     await build_db(tmp_path, [history_record("rec", url="https://cloud.test/")])
 
     report = await run(tmp_path)
@@ -540,17 +540,17 @@ async def test_sync_source_alone_still_works(tmp_path: Path) -> None:
     assert report.items[0].source == "sync"
     assert report.items[0].source_machine is None
     assert report.sources == ["sync"]
-    assert report.local_records == 0
+    assert report.firefox_records == 0
 
 
 async def test_the_same_visit_from_both_sources_is_one_row(tmp_path: Path) -> None:
     """**这张票的核心**：同一次访问两个源都有 —— 只出一行，标成 both。
 
     能对上的前提是两边的微秒**完全相等**：云端那条走 ``date / 1e6`` 的浮点换算，
-    本地这条走整数换算。这条测试就是那个不变量的看门人。
+    firefox 这条走整数换算。这条测试就是那个不变量的看门人。
     """
     await build_db(tmp_path, [history_record("rec", url="https://both.test/", visits=[(DAY, 1)])])
-    await add_local(tmp_path, [local_visit("https://both.test/", when=DAY)])
+    await add_firefox(tmp_path, [firefox_visit("https://both.test/", when=DAY)])
 
     report = await run(tmp_path)
 
@@ -563,12 +563,14 @@ async def test_the_same_visit_from_both_sources_is_one_row(tmp_path: Path) -> No
 async def test_a_different_visit_at_the_same_url_is_a_second_row(tmp_path: Path) -> None:
     """同一个 URL、**不同时刻**是两次访问 —— 不能合并掉。"""
     await build_db(tmp_path, [history_record("rec", url="https://both.test/", visits=[(DAY, 1)])])
-    await add_local(tmp_path, [local_visit("https://both.test/", when=DAY + timedelta(minutes=30))])
+    await add_firefox(
+        tmp_path, [firefox_visit("https://both.test/", when=DAY + timedelta(minutes=30))]
+    )
 
     report = await run(tmp_path)
 
     assert report.returned == 2
-    assert [item.source for item in report.items] == ["local", "sync"]
+    assert [item.source for item in report.items] == ["firefox", "sync"]
 
 
 async def test_merged_rows_stay_newest_first(tmp_path: Path) -> None:
@@ -579,11 +581,11 @@ async def test_merged_rows_stay_newest_first(tmp_path: Path) -> None:
             history_record("b", url="https://b.test/", visits=[(DAY + timedelta(hours=2), 1)]),
         ],
     )
-    await add_local(
+    await add_firefox(
         tmp_path,
         [
-            local_visit("https://a.test/", when=DAY),
-            local_visit("https://c.test/", when=DAY + timedelta(hours=1)),
+            firefox_visit("https://a.test/", when=DAY),
+            firefox_visit("https://c.test/", when=DAY + timedelta(hours=1)),
         ],
     )
 
@@ -594,29 +596,29 @@ async def test_merged_rows_stay_newest_first(tmp_path: Path) -> None:
         "https://c.test/",
         "https://a.test/",
     ]
-    assert [item.source for item in report.items] == ["sync", "local", "both"]
+    assert [item.source for item in report.items] == ["sync", "firefox", "both"]
 
 
 async def test_sources_field_says_what_contributed(tmp_path: Path) -> None:
     await build_db(tmp_path, [history_record("rec")])
-    await add_local(tmp_path, [local_visit()])
+    await add_firefox(tmp_path, [firefox_visit()])
 
     report = await run(tmp_path)
 
-    assert report.sources == ["sync", "local"]
-    assert report.local_records == 1
+    assert report.sources == ["sync", "firefox"]
+    assert report.firefox_records == 1
     assert report.records == 1
 
 
-async def test_local_visits_go_through_the_same_filters(tmp_path: Path) -> None:
+async def test_firefox_visits_go_through_the_same_filters(tmp_path: Path) -> None:
     """过滤器对两个源一视同仁 —— 不然"合并"就成了半成品。"""
     await build_db(tmp_path, [])
-    await add_local(
+    await add_firefox(
         tmp_path,
         [
-            local_visit("https://wanted.test/page", when=DAY, title="Wanted"),
-            local_visit("https://other.test/", when=DAY),
-            local_visit("https://wanted.test/old", when=DAY - timedelta(days=30)),
+            firefox_visit("https://wanted.test/page", when=DAY, title="Wanted"),
+            firefox_visit("https://other.test/", when=DAY),
+            firefox_visit("https://wanted.test/old", when=DAY - timedelta(days=30)),
         ],
     )
 
@@ -625,13 +627,13 @@ async def test_local_visits_go_through_the_same_filters(tmp_path: Path) -> None:
     assert [item.url for item in report.items] == ["https://wanted.test/page"]
 
 
-async def test_local_visit_borrows_the_sync_title_when_it_has_none(tmp_path: Path) -> None:
-    """本地那条没标题、云端那条有 —— 合并后别把标题丢了。"""
+async def test_firefox_visit_borrows_the_sync_title_when_it_has_none(tmp_path: Path) -> None:
+    """firefox 那条没标题、云端那条有 —— 合并后别把标题丢了。"""
     await build_db(
         tmp_path,
         [history_record("rec", url="https://both.test/", title="云端标题", visits=[(DAY, 1)])],
     )
-    await add_local(tmp_path, [local_visit("https://both.test/", when=DAY, title="")])
+    await add_firefox(tmp_path, [firefox_visit("https://both.test/", when=DAY, title="")])
 
     report = await run(tmp_path)
 
@@ -639,23 +641,24 @@ async def test_local_visit_borrows_the_sync_title_when_it_has_none(tmp_path: Pat
 
 
 async def test_format_version_bumped_for_the_new_shape(tmp_path: Path) -> None:
-    """形状变过两次：``source`` / ``source_machine``（2）、数据新鲜度（3）—— 每次都报出来。"""
+    """形状变过三次：``source`` / ``source_machine``（2）、数据新鲜度（3）、
+    ``source`` 取值与 ``firefox_records`` 改名（4）—— 每次都报出来。"""
     await build_db(tmp_path, [history_record("rec")])
 
     report = await run(tmp_path)
 
-    assert report.format_version == 3
+    assert report.format_version == 4
 
 
 async def test_json_shape_of_a_merged_row(tmp_path: Path) -> None:
     await build_db(tmp_path, [history_record("rec", url="https://both.test/", visits=[(DAY, 1)])])
-    await add_local(tmp_path, [local_visit("https://both.test/", when=DAY)])
+    await add_firefox(tmp_path, [firefox_visit("https://both.test/", when=DAY)])
 
     report = await run(tmp_path)
     payload = json.loads(report.to_json())
 
-    assert payload["sources"] == ["sync", "local"]
-    assert payload["local_records"] == 1
+    assert payload["sources"] == ["sync", "firefox"]
+    assert payload["firefox_records"] == 1
     assert payload["items"][0] == {
         "url": "https://both.test/",
         "title": "Example",

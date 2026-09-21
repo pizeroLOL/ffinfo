@@ -21,7 +21,7 @@ import pytest
 
 from ffinfo.errors import ConfigurationError
 from ffinfo.storage import EncryptedBso
-from ffinfo_cli.places import LocalVisit
+from ffinfo_cli.places import FirefoxVisit
 from ffinfo_cli.portable import (
     ExportSource,
     PortableCursor,
@@ -189,7 +189,7 @@ def portable_file(path: Path, *, visits: list[tuple[str, int]], machine: str = "
         path,
         source=ExportSource(machine=machine, profile="default-release", generator="test"),
         visits=[
-            LocalVisit(
+            FirefoxVisit(
                 url=url,
                 title="T",
                 visited_at=datetime.fromtimestamp(us // US, tz=UTC).replace(microsecond=us % US),
@@ -201,7 +201,7 @@ def portable_file(path: Path, *, visits: list[tuple[str, int]], machine: str = "
     )
 
 
-async def test_import_lands_in_the_local_table(tmp_path: Path) -> None:
+async def test_import_lands_in_the_firefox_table(tmp_path: Path) -> None:
     portable_file(tmp_path / "portable.sqlite", visits=[("https://a.example/", micros(DAY))])
 
     report = await run_import(
@@ -303,7 +303,7 @@ async def test_export_then_import_then_query(tmp_path: Path) -> None:
 
     assert report.visits_inserted == 2
     store = await open_database(target_home / "db.sqlite")
-    stored = await store.load_local_visits()
+    stored = await store.load_firefox_visits()
     assert [item.url for item in stored] == ["https://a.example/", "https://b.example/"]
     assert stored[0].machine == "test-laptop"
 

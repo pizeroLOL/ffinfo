@@ -12,11 +12,11 @@
 | ``bookmarks`` | **树** | 父子层级是书签的主要信息，拍平就没了 |
 | ``tabs`` | 按设备分组 | 一个 BSO 就是一台设备 |
 
-**历史是双源的**：云端 Sync 拉下来的（``sync_records``，要解密）和本地 ``places.sqlite``
-导入进来的（``local_visits``，本来就是明文）在查询时合并。合并按
+**历史是双源的**：云端 Sync 拉下来的（``sync_records``，要解密）和 firefox 的 ``places.sqlite``
+导入进来的（``firefox_visits``，本来就是明文）在查询时合并。合并按
 ``(url, 访问时刻)`` —— **逐微秒相等才算同一次访问**，这样"两个源都有"的那条只出一行、
-标成 ``both``，而不是重复两行。只有一边有就照常出，标 ``sync`` 或 ``local``。
-本地源是空的（目标机器没导入过）就自然降级成单源，不用特判。
+标成 ``both``，而不是重复两行。只有一边有就照常出，标 ``sync`` 或 ``firefox``。
+firefox 源是空的（目标机器没导入过）就自然降级成单源，不用特判。
 
 两个约定，别混：
 
@@ -55,13 +55,13 @@ _KEYS_RECORD_ID: Final = "keys"
 _MAX_SKIPPED_DETAILS: Final = 10
 """JSON 里最多列几条解密失败的明细。够定位就行，别把整页灌进去。"""
 
-type VisitSource = Literal["sync", "local", "both"]
+type VisitSource = Literal["sync", "firefox", "both"]
 """一条访问打哪儿来 —— **三个值就是全部**，写错了 pyright 当场红。
 
 这个字段是给 agent 消费的契约（见 ``format_version``），不是内部枚举：
-``sync`` 云端 · ``local`` 本地 places · ``both`` 两边都有（合并后只出一行）。"""
+``sync`` 云端 · ``firefox`` firefox 源 · ``both`` 两边都有（合并后只出一行）。"""
 
-type SourceName = Literal["sync", "local"]
+type SourceName = Literal["sync", "firefox"]
 """``sources`` 里出现的源名 —— ``both`` 不属于这里，它是**合并之后**才有的结论。"""
 
 DATA_TYPES: Final = ("history", "bookmarks", "tabs")
@@ -87,11 +87,11 @@ class HistoryItem(BaseModel):
     visit_type: int
     visit_type_name: str
     record_id: str | None
-    """云端那条记录的 GUID。**本地源来的是 ``null``** —— 它压根没有这个 id。"""
+    """云端那条记录的 GUID。**firefox 源来的是 ``null``** —— 它压根没有这个 id。"""
     source: VisitSource
-    """这条打哪儿来：``sync``（云端）· ``local``（本地 places）· ``both``（两边都有）。"""
+    """这条打哪儿来：``sync``（云端）· ``firefox``（firefox 源）· ``both``（两边都有）。"""
     source_machine: str | None
-    """本地源那边导出它的机器名。``source`` 是 ``sync`` 时是 ``null``。"""
+    """firefox 源那边导出它的机器名。``source`` 是 ``sync`` 时是 ``null``。"""
 
 
 class ListReport(BaseModel):
@@ -99,8 +99,10 @@ class ListReport(BaseModel):
 
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
 
-    format_version: int = 3
-    """**3**：加了 ``synced_at`` / ``age_seconds``（数据新鲜度）。
+    format_version: int = 4
+    """**4**：``source`` 取值 ``local`` → ``firefox``、``local_records`` → ``firefox_records``
+    （破坏性改名，调用方要跟着改）。
+    **3**：加了 ``synced_at`` / ``age_seconds``（数据新鲜度）。
     **2**：历史条目加了 ``source`` / ``source_machine``，``record_id`` 可为 null。"""
     data_type: str
     generated_at: str
@@ -114,8 +116,8 @@ class ListReport(BaseModel):
     """``synced_at`` 距现在多少秒：**数据有多陈**。消费方自己决定要不要先跑 ``sync``。"""
     visits: int = 0
     """``history`` 用：**云端**拍平后、过滤前的访问次数（一条记录可以有多次访问）。"""
-    local_records: int = 0
-    """``history`` 用：本地源那边读出来多少条访问。"""
+    firefox_records: int = 0
+    """``history`` 用：firefox 源那边读出来多少条访问。"""
     sources: list[SourceName] = []
     """实际出了数据的源。只有一个时就是**降级到单源**了。"""
     skipped: int
@@ -204,8 +206,8 @@ async def run_list(
     store = await open_database(database_path, warn=warn)
     key = await _collection_key(store, credentials.sync_key_bundle(), data_type)
     records = await store.load_records(data_type)
-    # 本地源只有历史这一种 —— 书签与标签页是云端独有
-    local = await store.load_local_visits() if data_type == "history" else ()
+    # firefox 源只有历史这一种 —— 书签与标签页是云端独有
+    firefox = await store.load_firefox_visits() if data_type == "history" else ()
 
     # 数据新鲜度：sync 挂了的时候 list 照样输出，但"陈"这件事要有字段说出来
     cursor = next(
@@ -233,7 +235,7 @@ async def run_list(
         return _history_report(
             records,
             key,
-            local,
+            firefox,
             common,
             since=since,
             domain=domain,
@@ -252,7 +254,7 @@ async def run_list(
 def _history_report(
     records: Sequence[tuple[str, str | None]],
     key: KeyBundle,
-    local: Sequence[StoredVisit],
+    firefox: Sequence[StoredVisit],
     common: dict[str, Any],
     *,
     since: datetime | None,
@@ -263,13 +265,13 @@ def _history_report(
     """历史：**两个源合并**，拍平成一次访问一行，最新的在前。"""
     decrypted = decrypt_history(records, key)
     _guard_all_failed(
-        decrypted.records, len(decrypted.entries), len(decrypted.skipped), fallback=len(local)
+        decrypted.records, len(decrypted.entries), len(decrypted.skipped), fallback=len(firefox)
     )
 
     matches = _keeper(since=since, domain=domain, search=search)
     selected = [
         item
-        for item in _merge_history(decrypted.entries, local)
+        for item in _merge_history(decrypted.entries, firefox)
         if matches(when=item.visited_at, url=item.url, title=item.title)
     ]
     selected.sort(key=lambda item: item.visited_at, reverse=True)
@@ -278,8 +280,8 @@ def _history_report(
     return ListReport(
         **common,
         visits=len(decrypted.entries),
-        local_records=len(local),
-        sources=_sources(len(decrypted.entries), len(local)),
+        firefox_records=len(firefox),
+        sources=_sources(len(decrypted.entries), len(firefox)),
         skipped=len(decrypted.skipped),
         skipped_details=_details(decrypted.skipped),
         matched=len(selected),
@@ -302,12 +304,12 @@ class _MergedVisit:
 
 
 def _merge_history(
-    entries: Sequence[HistoryEntry], local: Sequence[StoredVisit]
+    entries: Sequence[HistoryEntry], firefox: Sequence[StoredVisit]
 ) -> list[_MergedVisit]:
-    """把云端与本地两个源并成一个列表。
+    """把云端与 firefox 两个源并成一个列表。
 
     **认"同一次访问"靠 ``(url, 微秒)``。** 云端那条的时刻来自记录里的 ``date``，
-    本地那条来自 ``moz_historyvisits.visit_date`` —— 两边都是 PRTime 微秒，
+    firefox 那条来自 ``moz_historyvisits.visit_date`` —— 两边都是 PRTime 微秒，
     所以只要换算不引入误差，它们就能精确对上。这也是 ``ffinfo.timestamps`` 里坚持走整数运算的原因：
     差 1 微秒，同一次访问就会出两行。
     """
@@ -323,7 +325,7 @@ def _merge_history(
             machine=None,
         )
 
-    for item in local:
+    for item in firefox:
         key = (item.url, to_microseconds(item.visited_at))
         existing = merged.get(key)
         if existing is None:
@@ -333,7 +335,7 @@ def _merge_history(
                 visited_at=item.visited_at,
                 visit_type=item.visit_type,
                 record_id=None,
-                source="local",
+                source="firefox",
                 machine=item.machine,
             )
             continue
@@ -360,11 +362,11 @@ def _item(visit: _MergedVisit) -> HistoryItem:
     )
 
 
-def _sources(sync_visits: int, local_visits: int) -> list[SourceName]:
+def _sources(sync_visits: int, firefox_visits: int) -> list[SourceName]:
     """哪些源真的出了数据 —— 只剩一个就说明这次是**单源降级**。"""
     pairs: tuple[tuple[SourceName, int], ...] = (
         ("sync", sync_visits),
-        ("local", local_visits),
+        ("firefox", firefox_visits),
     )
     return [name for name, count in pairs if count]
 
@@ -467,8 +469,8 @@ def _tabs_report(
 def _guard_all_failed(records: int, produced: int, skipped: int, *, fallback: int = 0) -> None:
     """一条都解不开时别装没事 —— 多半是换了账号。
 
-    ``fallback`` 是有本地源兜底时的条数：那种情况下查询仍有结果，
-    拦下来反而把用户自己的本地数据也一起藏了（报告里的 ``skipped`` 照样会写）。
+    ``fallback`` 是有 firefox 源兜底时的条数：那种情况下查询仍有结果，
+    拦下来反而把用户自己的 firefox 数据也一起藏了（报告里的 ``skipped`` 照样会写）。
     """
     if records and not produced and skipped == records and not fallback:
         msg = (

@@ -3,7 +3,7 @@
 **这一层不解密。** Sync 拉下来的 ``payload`` 是加密原文，原样进库；解密在 ``list`` 那边。
 
 表按设计文档决策 12 的"双源分表 + 保留来源标记"来切：``sync_records`` 只放云端来的，
-将来本地 ``places.sqlite`` 来的走另一张表 —— 不硬凑成一张。
+firefox ``places.sqlite`` 来的走另一张表 —— 不硬凑成一张。
 
 对外的 interface 是 :class:`Store`：piccolo 只在这个 module 里出现，调用方碰不到表类与绑定。
 
@@ -38,7 +38,7 @@ __all__ = [
     "ApplyResult",
     "CollectionBatch",
     "CursorInfo",
-    "LocalVisitRow",
+    "FirefoxVisitRow",
     "Store",
     "StoredVisit",
     "SyncCursor",
@@ -74,8 +74,8 @@ class SyncCursor(Table, tablename="sync_cursors"):
     records: Integer = Integer()
 
 
-class LocalVisitRow(Table, tablename="local_visits"):
-    """本地 ``places.sqlite`` 来的一次访问 —— **明文**，没有解密这回事。
+class FirefoxVisitRow(Table, tablename="firefox_visits"):
+    """firefox 源的 ``places.sqlite`` 来的一次访问 —— **明文**，没有解密这回事。
 
     与 ``sync_records`` 分表是设计文档决策 12 定的：两个源不硬凑成一张，
     查询时才合并。``machine`` 是导出那台机器的名字（同一个库将来可能收下好几台）。
@@ -91,7 +91,7 @@ class LocalVisitRow(Table, tablename="local_visits"):
 
 @dataclass(frozen=True, slots=True)
 class StoredVisit:
-    """库里的一次本地访问。"""
+    """库里的一次 firefox 访问。"""
 
     machine: str
     url: str
@@ -310,8 +310,8 @@ class Store:
             for row in rows
         )
 
-    async def store_local_visits(self, visits: Sequence[StoredVisit]) -> ApplyResult:
-        """写入本地访问。**幂等** —— 同一份导出再导一次，条数不会翻倍。
+    async def store_firefox_visits(self, visits: Sequence[StoredVisit]) -> ApplyResult:
+        """写入 firefox 源的访问。**幂等** —— 同一份导出再导一次，条数不会翻倍。
 
         认"同一次访问"靠 ``(machine, url, visited_at)``：那个自增主键在"删了重插"之后会
         重排（实测），拿它当身份会串行。同一批里重复出现的也在这里顺手去重。
@@ -324,16 +324,16 @@ class Store:
                 row["id"],
                 str(row["title"]),
             )
-            for row in await LocalVisitRow.select(
-                LocalVisitRow.id,
-                LocalVisitRow.machine,
-                LocalVisitRow.url,
-                LocalVisitRow.visited_at,
-                LocalVisitRow.title,
+            for row in await FirefoxVisitRow.select(
+                FirefoxVisitRow.id,
+                FirefoxVisitRow.machine,
+                FirefoxVisitRow.url,
+                FirefoxVisitRow.visited_at,
+                FirefoxVisitRow.title,
             )
         }
 
-        fresh: list[LocalVisitRow] = []
+        fresh: list[FirefoxVisitRow] = []
         updates: list[tuple[int, str]] = []
         seen: set[tuple[str, str, int]] = set()
         for item in visits:
@@ -344,7 +344,7 @@ class Store:
             found = existing.get(key)
             if found is None:
                 fresh.append(
-                    LocalVisitRow(
+                    FirefoxVisitRow(
                         machine=item.machine,
                         url=item.url,
                         title=item.title,
@@ -356,18 +356,18 @@ class Store:
                 updates.append((found[0], item.title))
 
         if fresh:
-            await LocalVisitRow.insert(*fresh)
+            await FirefoxVisitRow.insert(*fresh)
         for row_id, title in updates:
-            await LocalVisitRow.update({LocalVisitRow.title: title}).where(
-                LocalVisitRow.id == row_id
+            await FirefoxVisitRow.update({FirefoxVisitRow.title: title}).where(
+                FirefoxVisitRow.id == row_id
             )
 
         return ApplyResult(inserted=len(fresh), updated=len(updates), deleted=0)
 
-    async def load_local_visits(self) -> tuple[StoredVisit, ...]:
-        """读出全部本地访问，按时间升序。**没导入过就是空元组** —— 单源降级走这条路。"""
+    async def load_firefox_visits(self) -> tuple[StoredVisit, ...]:
+        """读出全部 firefox 访问，按时间升序。**没导入过就是空元组** —— 单源降级走这条路。"""
         self._bind()
-        rows = await LocalVisitRow.select().order_by(LocalVisitRow.visited_at)
+        rows = await FirefoxVisitRow.select().order_by(FirefoxVisitRow.visited_at)
         return tuple(
             StoredVisit(
                 machine=str(row["machine"]),
@@ -509,7 +509,7 @@ def _bind(engine: SQLiteEngine) -> None:
     piccolo 的表是类级别的单例，"绑哪个库"只能挂在类上 —— 所以每次操作都显式重绑一次，
     测试才能各用各的临时库（见 ``tests/test_store.py``）。
     """
-    for table in (LocalVisitRow, SyncRecord, SyncCursor):
+    for table in (FirefoxVisitRow, SyncRecord, SyncCursor):
         # piccolo 没有"换绑数据库"的公开 API —— 只能碰类的 _meta
         table._meta.db = engine  # pyright: ignore[reportPrivateUsage]
 
@@ -522,7 +522,10 @@ async def open_database(
 ) -> Store:
     """打开本地库，表不存在就建，返回 :class:`Store`。**不建默认路径** —— 路径由调用者给。
 
-    ``read_only=True``：**只读打开** —— 不建表、不做重复行收敛。"把数据读出来带走"的
+    老库里的 ``local_visits`` 先就地改名成 ``firefox_visits``（见 :func:`_migrate_firefox_visits`）
+    —— 改名前不建新表，否则新表一建就再也没机会改。
+
+    ``read_only=True``：**只读打开** —— 不建表、不迁移、不做重复行收敛。"把数据读出来带走"的
     命令（``export``）不该改本地状态。
 
     ``warn``：收敛老库里的重复行时往哪儿说。**不注入就没人知道** —— 删除数据这种事
@@ -533,11 +536,29 @@ async def open_database(
     _bind(engine)
     if read_only:
         return Store(engine)
+    await _migrate_firefox_visits()
     await SyncRecord.create_table(if_not_exists=True)
     await SyncCursor.create_table(if_not_exists=True)
-    await LocalVisitRow.create_table(if_not_exists=True)
+    await FirefoxVisitRow.create_table(if_not_exists=True)
     await _enforce_record_identity(engine, warn)
     return Store(engine)
+
+
+async def _migrate_firefox_visits() -> None:
+    """老库里的 ``local_visits`` 就地改名成 ``firefox_visits``。
+
+    **不改就是静默丢数据**：新表空着没人写、旧表没人读，已经导入的 firefox 访问
+    在查询里无声消失。只在"旧表在、新表不在"时动手；已经改过或新建的库不碰。
+    """
+    tables = {
+        str(row["name"])
+        for row in await FirefoxVisitRow.raw(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+            " AND name IN ('local_visits', 'firefox_visits')"
+        )
+    }
+    if "local_visits" in tables and "firefox_visits" not in tables:
+        await FirefoxVisitRow.raw("ALTER TABLE local_visits RENAME TO firefox_visits")
 
 
 _RECORD_IDENTITY_INDEX: Final = "ux_sync_records_collection_record_id"
