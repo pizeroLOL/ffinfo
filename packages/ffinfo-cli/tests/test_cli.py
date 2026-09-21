@@ -22,7 +22,8 @@ from ffinfo.errors import (
     SyncProtocolError,
 )
 from ffinfo.oauth import Credentials
-from ffinfo_cli.cli import app, error_payload
+from ffinfo_cli.cli import app
+from ffinfo_cli.failures import error_payload
 
 runner = CliRunner()
 
@@ -152,7 +153,7 @@ def test_login_without_oldsync_keys_is_auth_exit_4(monkeypatch: pytest.MonkeyPat
     def fake_login(**_kwargs: object) -> Credentials:
         return credentials
 
-    monkeypatch.setattr("ffinfo_cli.cli.login_sync", fake_login)
+    monkeypatch.setattr("ffinfo_cli.commands.login.login_sync", fake_login)
 
     result = runner.invoke(app, ["login"])
 
@@ -189,3 +190,20 @@ def test_import_from_firefox_with_a_bad_profile_is_configuration_exit_3(
 
     assert result.exit_code == 3
     assert json.loads(result.stderr)["error"]["code"] == "configuration"
+
+
+def test_short_help_flag_works() -> None:
+    """``-h`` 与 ``--help`` 同效 —— 用户敲短的那一个。"""
+    result = runner.invoke(app, ["-h"])
+
+    assert result.exit_code == 0
+    assert "login" in result.stdout
+    assert "sync" in result.stdout
+
+
+def test_completion_script_is_available() -> None:
+    """``--show-completion`` 能吐出补全脚本 —— bash 补全的入口。"""
+    result = runner.invoke(app, ["--show-completion", "bash"])
+
+    assert result.exit_code == 0
+    assert result.stdout.strip()
