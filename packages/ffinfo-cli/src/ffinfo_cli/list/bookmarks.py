@@ -11,18 +11,59 @@ import asyncio
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
+
+from pydantic import BaseModel, ConfigDict
 
 from ffinfo.bookmarks import BookmarkNode, parse_bookmarks
 from ffinfo.crypto import KeyBundle
 from ffinfo_cli.list.common import (
-    ListReport,
+    SourceName,
     cloud_key,
     details,
     guard_all_failed,
     load_shell,
     truncate,
 )
+
+
+class BookmarksReport(BaseModel):
+    """``list bookmarks`` 的输出 —— 保留父子层级的树。
+
+    与 history / tabs 的报告**没有共同基类**：共享的是形状，用 ``report.ListReport``
+    这个 union 表达。序列化暂时是 ``report.to_json`` （06 会收进 ``render.py``）。
+    """
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    format_version: int = 5
+    """**5**：报告拆成三份互不继承的类型（形状不变，仍是 v4 的扁平字段）。"""
+    data_type: str
+    generated_at: str
+    filters: dict[str, str | int | None]
+    records: int
+    """库里读出来的记录条数。"""
+    synced_at: str | None = None
+    """这个 collection **上次成功 sync** 的时间（UTC ISO）。从未同步过就是 ``null``。"""
+    age_seconds: float | None = None
+    """``synced_at`` 距现在多少秒：**数据有多陈**。"""
+    firefox_records: int = 0
+    """v4 外壳留下的字段 —— 书签没有 firefox 源，恒为 0；保留是为了形状逐字段不变。"""
+    sources: list[SourceName] = []
+    """v4 外壳留下的字段 —— 书签没有多源合并，恒为空；保留是为了形状逐字段不变。"""
+    skipped: int
+    """没能进结果的记录条数（解密失败、或建树时丢弃的病态记录）—— 单条坏掉不连坐。"""
+    skipped_details: list[dict[str, str]] = []
+    notes: list[str] = []
+    """结果为空但**不是失败**时的提示 —— 比如 ``--path`` 什么都没命中。退出码照旧 0。"""
+    matched: int
+    """过滤之后剩多少条 —— 对 bookmarks 是书签条数（文件夹是结构，不计）。"""
+    returned: int
+    """实际返回多少条（``--limit`` 之后，口径与 ``matched`` 相同）。"""
+    tree: list[BookmarkNode] = []
+    """**保留层级**，不是拍平的表。"""
+    counts: dict[str, int] = {}
+    """**返回的这棵树**里各类节点各有多少（含作为结构的文件夹）。"""
 
 
 async def run_bookmarks(
@@ -34,7 +75,7 @@ async def run_bookmarks(
     limit: int | None = None,
     warn: Callable[[str], None] | None = None,
     clock: Callable[[], float] = time.time,
-) -> ListReport:
+) -> BookmarksReport:
     """读库 → 解密 → 建树 → 按路径选根 → 出报告。全程不联网。"""
     shell = await load_shell(
         database_path=database_path,
@@ -59,7 +100,7 @@ def _bookmark_report(
     *,
     path: str | None,
     limit: int | None,
-) -> ListReport:
+) -> BookmarksReport:
     """书签：**保留树**。``--path`` 命中后从命中文件夹重新生根，祖先剪掉。
 
     ``--limit`` 数的是**书签条数** —— 文件夹是挂书签用的结构，不占名额
@@ -83,7 +124,7 @@ def _bookmark_report(
     tree = _prune(roots, lambda node: node.id in kept_ids)
     not_in_tree = decrypted.skipped + decrypted.dropped
 
-    return ListReport(
+    return BookmarksReport(
         **common,
         skipped=len(not_in_tree),
         skipped_details=details(not_in_tree),
@@ -181,7 +222,7 @@ def list_bookmarks_blocking(
     path: str | None = None,
     limit: int | None = None,
     warn: Callable[[str], None] | None = None,
-) -> ListReport:
+) -> BookmarksReport:
     """:func:`run_bookmarks` 的同步外壳。纯本地，所以没有 HTTP 客户端要开。"""
     return asyncio.run(
         run_bookmarks(

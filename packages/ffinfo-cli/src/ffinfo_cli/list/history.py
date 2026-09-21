@@ -15,14 +15,14 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
+
+from pydantic import BaseModel, ConfigDict
 
 from ffinfo.crypto import KeyBundle
 from ffinfo.history import DecryptionReport, HistoryEntry, decrypt_history, visit_type_name
 from ffinfo.timestamps import to_microseconds
 from ffinfo_cli.list.common import (
-    HistoryItem,
-    ListReport,
     SourceName,
     VisitSource,
     cloud_key,
@@ -33,6 +33,68 @@ from ffinfo_cli.list.common import (
     truncate,
 )
 from ffinfo_cli.store import StoredVisit
+
+
+class HistoryItem(BaseModel):
+    """一条浏览记录。"""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    url: str
+    title: str
+    visited_at: str
+    """ISO 8601，UTC。"""
+    visit_type: int
+    visit_type_name: str
+    record_id: str | None
+    """云端那条记录的 GUID。**firefox 源来的是 ``null``** —— 它压根没有这个 id。"""
+    source: VisitSource
+    """这条打哪儿来：``sync``（云端）· ``firefox``（firefox 源）· ``both``（两边都有）。"""
+    source_machine: str | None
+    """firefox 源那边导出它的机器名。``source`` 是 ``sync`` 时是 ``null``。"""
+
+
+class HistoryReport(BaseModel):
+    """``list history`` 的输出 —— 双源合并后，一次访问一行。
+
+    与 bookmarks / tabs 的报告**没有共同基类**：共享的是形状，用 ``report.ListReport``
+    这个 union 表达。序列化暂时是 ``report.to_json`` （06 会收进 ``render.py``）。
+    """
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    format_version: int = 5
+    """**5**：报告拆成三份互不继承的类型（形状不变，仍是 v4 的扁平字段）。
+    **4**：``source`` 取值 ``local`` → ``firefox``、``local_records`` → ``firefox_records``
+    （破坏性改名，调用方要跟着改）。
+    **3**：加了 ``synced_at`` / ``age_seconds``（数据新鲜度）。
+    **2**：历史条目加了 ``source`` / ``source_machine``，``record_id`` 可为 null。"""
+    data_type: str
+    generated_at: str
+    filters: dict[str, str | int | None]
+    records: int
+    """库里读出来的记录条数。"""
+    synced_at: str | None = None
+    """这个 collection **上次成功 sync** 的时间（UTC ISO）。
+    从未同步过就是 ``null`` —— 别假装有数据。"""
+    age_seconds: float | None = None
+    """``synced_at`` 距现在多少秒：**数据有多陈**。消费方自己决定要不要先跑 ``sync``。"""
+    visits: int = 0
+    """**云端**拍平后、过滤前的访问次数（一条记录可以有多次访问）。"""
+    firefox_records: int = 0
+    """firefox 源那边读出来多少条访问。"""
+    sources: list[SourceName] = []
+    """实际出了数据的源。只有一个时就是**降级到单源**了。"""
+    skipped: int
+    """没能进结果的记录条数（解密失败、或建树时丢弃的病态记录）—— 单条坏掉不连坐。"""
+    skipped_details: list[dict[str, str]] = []
+    notes: list[str] = []
+    """结果为空但**不是失败**时的提示 —— 数据相关，不是用法错误。退出码照旧 0。"""
+    matched: int
+    """过滤之后剩多少条 —— 对 history 是访问次数。"""
+    returned: int
+    """实际返回多少条（``--limit`` 之后，口径与 ``matched`` 相同）。"""
+    items: list[HistoryItem] = []
 
 
 async def run_history(
@@ -46,7 +108,7 @@ async def run_history(
     limit: int | None = None,
     warn: Callable[[str], None] | None = None,
     clock: Callable[[], float] = time.time,
-) -> ListReport:
+) -> HistoryReport:
     """读库 → 解密 → 过滤 → 出报告。全程不联网。"""
     shell = await load_shell(
         database_path=database_path,
@@ -94,7 +156,7 @@ def _history_report(
     domain: str | None,
     search: str | None,
     limit: int | None,
-) -> ListReport:
+) -> HistoryReport:
     """历史：**两个源合并**，拍平成一次访问一行，最新的在前。"""
     # ``key is None`` 只在“库里没有任何云端记录”时发生（见 run_history）—— 此时没有密文要解，
     # 空结果就是全部真相；纯 firefox 源的人不需要 age 私钥。
@@ -116,7 +178,7 @@ def _history_report(
     selected.sort(key=lambda item: item.visited_at, reverse=True)
 
     returned = truncate(selected, limit)
-    return ListReport(
+    return HistoryReport(
         **common,
         visits=len(decrypted.entries),
         firefox_records=len(firefox),
@@ -220,7 +282,7 @@ def list_history_blocking(
     search: str | None = None,
     limit: int | None = None,
     warn: Callable[[str], None] | None = None,
-) -> ListReport:
+) -> HistoryReport:
     """:func:`run_history` 的同步外壳。纯本地，所以没有 HTTP 客户端要开。"""
     return asyncio.run(
         run_history(

@@ -6,29 +6,37 @@
 * :mod:`ffinfo_cli.list.bookmarks` —— 建树 / 剪枝
 * :mod:`ffinfo_cli.list.tabs` —— 按设备分组
 
-``common`` 放三边共用的外壳、过滤口径与报告模型。``--data-type`` 字符串 dispatcher
+三份报告模型各自在自己的模块里（互不继承），``report`` 放 union 别名与临时序列化；
+``common`` 放三边共用的外壳、过滤口径与契约类型。``--data-type`` 字符串 dispatcher
 已经删掉 —— 一个类型一个入口。
 """
 
 from __future__ import annotations
 
-from ffinfo_cli.list.bookmarks import list_bookmarks_blocking, run_bookmarks
+from ffinfo_cli.list.bookmarks import BookmarksReport, list_bookmarks_blocking, run_bookmarks
 from ffinfo_cli.list.common import (
-    HistoryItem,
-    ListReport,
     SourceName,
     VisitSource,
     matches_domain,
     matches_search,
     parse_since,
 )
-from ffinfo_cli.list.history import list_history_blocking, run_history
-from ffinfo_cli.list.tabs import list_tabs_blocking, run_tabs
+from ffinfo_cli.list.history import (
+    HistoryItem,
+    HistoryReport,
+    list_history_blocking,
+    run_history,
+)
+from ffinfo_cli.list.report import ListReport, to_json
+from ffinfo_cli.list.tabs import TabsReport, list_tabs_blocking, run_tabs
 
 __all__ = [
+    "BookmarksReport",
     "HistoryItem",
+    "HistoryReport",
     "ListReport",
     "SourceName",
+    "TabsReport",
     "VisitSource",
     "list_bookmarks_blocking",
     "list_history_blocking",
@@ -39,4 +47,5 @@ __all__ = [
     "run_bookmarks",
     "run_history",
     "run_tabs",
+    "to_json",
 ]

@@ -1,9 +1,9 @@
-"""``list`` 三个子命令共用的外壳与工具 —— 取值、过滤口径、报告模型、密钥加载。
+"""``list`` 三个子命令共用的外壳与工具 —— 取值、过滤口径、契约类型、密钥加载。
 
 三种数据类型曾经共用一条 ``run_list(data_type=…)`` 管线；现在各自是
 ``run_history`` / ``run_bookmarks`` / ``run_tabs`` 一个入口，**这里只放三边都要的东西**：
 
-* 报告模型 ``ListReport`` / ``HistoryItem``（本票仍是旧的那份超集，04 会拆成三份）；
+* ``SourceName`` / ``VisitSource`` 这两个给 agent 的契约类型；
 * ``parse_since`` 与 ``matches_domain`` / ``matches_search`` 这两个过滤口径；
 * ``keeper`` / ``truncate`` / ``guard_all_failed`` / ``details`` 这些共享谓词；
 * ``load_shell`` —— 读库、读 firefox 源、拼报告里的公共字段；
@@ -18,21 +18,16 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar, Final, Literal
+from typing import Any, Final, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict
-
-from ffinfo.bookmarks import BookmarkNode
 from ffinfo.crypto import EncryptedPayload, KeyBundle
 from ffinfo.errors import ConfigurationError, DecryptionError
 from ffinfo.keys import CollectionKeys
-from ffinfo.tabs import ClientTabs
 from ffinfo_cli.store import Store, StoredVisit, open_database
 from ffinfo_cli.sync import load_credentials
 
@@ -50,98 +45,6 @@ type VisitSource = Literal["sync", "firefox", "both"]
 
 type SourceName = Literal["sync", "firefox"]
 """``sources`` 里出现的源名 —— ``both`` 不属于这里，它是**合并之后**才有的结论。"""
-
-_EXCLUDED_FIELDS: Final[dict[str, set[str]]] = {
-    "history": {"tree", "counts", "clients"},
-    "bookmarks": {"items", "visits", "clients"},
-    "tabs": {"items", "visits", "tree", "counts"},
-}
-"""每种类型不输出的字段 —— 免得 JSON 里躺着一堆空数组。"""
-
-
-class HistoryItem(BaseModel):
-    """一条浏览记录。"""
-
-    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
-
-    url: str
-    title: str
-    visited_at: str
-    """ISO 8601，UTC。"""
-    visit_type: int
-    visit_type_name: str
-    record_id: str | None
-    """云端那条记录的 GUID。**firefox 源来的是 ``null``** —— 它压根没有这个 id。"""
-    source: VisitSource
-    """这条打哪儿来：``sync``（云端）· ``firefox``（firefox 源）· ``both``（两边都有）。"""
-    source_machine: str | None
-    """firefox 源那边导出它的机器名。``source`` 是 ``sync`` 时是 ``null``。"""
-
-
-class ListReport(BaseModel):
-    """``list`` 的输出。三种数据类型共用一个外壳（04 会拆成三份）。"""
-
-    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
-
-    format_version: int = 4
-    """**4**：``source`` 取值 ``local`` → ``firefox``、``local_records`` → ``firefox_records``
-    （破坏性改名，调用方要跟着改）。
-    **3**：加了 ``synced_at`` / ``age_seconds``（数据新鲜度）。
-    **2**：历史条目加了 ``source`` / ``source_machine``，``record_id`` 可为 null。"""
-    data_type: str
-    generated_at: str
-    filters: dict[str, str | int | None]
-    records: int
-    """库里读出来的记录条数。"""
-    synced_at: str | None = None
-    """这个 collection **上次成功 sync** 的时间（UTC ISO）。
-    从未同步过就是 ``null`` —— 别假装有数据。"""
-    age_seconds: float | None = None
-    """``synced_at`` 距现在多少秒：**数据有多陈**。消费方自己决定要不要先跑 ``sync``。"""
-    visits: int = 0
-    """``history`` 用：**云端**拍平后、过滤前的访问次数（一条记录可以有多次访问）。"""
-    firefox_records: int = 0
-    """``history`` 用：firefox 源那边读出来多少条访问。"""
-    sources: list[SourceName] = []
-    """实际出了数据的源。只有一个时就是**降级到单源**了。"""
-    skipped: int
-    """没能进结果的记录条数（解密失败、或建树时丢弃的病态记录）—— 单条坏掉不连坐。"""
-    skipped_details: list[dict[str, str]] = []
-    notes: list[str] = []
-    """结果为空但**不是失败**时的提示 —— 比如 ``--path`` / ``--device`` 什么都没命中。
-
-    数据相关，不是用法错误：agent 不该靠退出码猜库里有没有这个文件夹 / 设备。
-    退出码照旧 0，报告里给一句话。"""
-    matched: int
-    """过滤之后剩多少条 —— history 是访问次数、bookmarks 是书签条数、tabs 是标签页数
-    （文件夹与设备是结构，不计）。"""
-    returned: int
-    """实际返回多少条（``--limit`` 之后，口径与 ``matched`` 相同）。"""
-    items: list[HistoryItem] = []
-    """``history`` 用。"""
-    tree: list[BookmarkNode] = []
-    """``bookmarks`` 用 —— **保留层级**，不是拍平的表。"""
-    counts: dict[str, int] = {}
-    """``bookmarks`` 用：**返回的这棵树**里各类节点各有多少（含作为结构的文件夹）。"""
-    clients: list[ClientTabs] = []
-    """``tabs`` 用 —— 按设备分组。"""
-
-    def to_json(self) -> str:
-        """给 agent 消费的 JSON。不相关的字段直接不输出。"""
-        payload = self.model_dump(exclude=_EXCLUDED_FIELDS[self.data_type])
-        return json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default)
-
-
-def _json_default(value: object) -> str:
-    """``json.dumps`` 遇到富类型时的兜底 —— 目前只有时间字段的 ``datetime``。
-
-    **统一走 ``isoformat()``**（``+00:00``），与 history 的字符串格式逐字节一致；
-    pydantic 自己的 json 模式会写成 ``Z``，两种风格混在一份输出里不好。
-    """
-    if isinstance(value, datetime):
-        return value.isoformat()
-    msg = f"JSON 不认识这个类型：{type(value).__name__}"
-    raise TypeError(msg)
 
 
 @dataclass(frozen=True, slots=True)

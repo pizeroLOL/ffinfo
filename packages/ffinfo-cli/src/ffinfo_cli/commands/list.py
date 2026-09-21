@@ -19,6 +19,7 @@ from ffinfo_cli.list import (
     list_history_blocking,
     list_tabs_blocking,
     parse_since,
+    to_json,
 )
 from ffinfo_cli.paths import credentials_path, database_path, identity_path
 
@@ -69,7 +70,7 @@ def history(
         )
     )
 
-    typer.echo(report.to_json())
+    typer.echo(to_json(report))
 
 
 def bookmarks(
@@ -93,7 +94,7 @@ def bookmarks(
         )
     )
 
-    typer.echo(report.to_json())
+    typer.echo(to_json(report))
 
 
 def tabs(
@@ -115,7 +116,7 @@ def tabs(
         )
     )
 
-    typer.echo(report.to_json())
+    typer.echo(to_json(report))
 
 
 def register(app: typer.Typer) -> None:

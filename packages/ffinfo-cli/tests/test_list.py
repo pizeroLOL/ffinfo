@@ -11,8 +11,10 @@ import json
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TypeVar, get_args
 
 import pytest
+from pydantic import BaseModel
 
 from ffinfo.credentials import AgeIdentity, CredentialStore
 from ffinfo.crypto import EncryptedPayload, KeyBundle
@@ -21,7 +23,16 @@ from ffinfo.keys import OLD_SYNC_SCOPE, ScopedKey
 from ffinfo.oauth import Credentials
 from ffinfo.storage import EncryptedBso
 from ffinfo_cli import list as list_module
-from ffinfo_cli.list import ListReport, matches_domain, matches_search, parse_since
+from ffinfo_cli.list import (
+    BookmarksReport,
+    HistoryReport,
+    ListReport,
+    TabsReport,
+    matches_domain,
+    matches_search,
+    parse_since,
+)
+from ffinfo_cli.list.report import to_json
 from ffinfo_cli.store import (
     CollectionBatch,
     StoredVisit,
@@ -189,8 +200,8 @@ async def build_db(
 
 
 async def _run(
-    entry: Callable[..., Awaitable[ListReport]], tmp_path: Path, **kwargs: object
-) -> ListReport:
+    entry: Callable[..., Awaitable[ReportT]], tmp_path: Path, **kwargs: object
+) -> ReportT:
     identity_path, credentials_path = write_credentials(tmp_path)
     return await entry(
         identity_path=identity_path,
@@ -201,16 +212,19 @@ async def _run(
     )
 
 
-async def run(tmp_path: Path, **kwargs: object) -> ListReport:
+ReportT = TypeVar("ReportT", HistoryReport, BookmarksReport, TabsReport)
+
+
+async def run(tmp_path: Path, **kwargs: object) -> HistoryReport:
     """历史查询 —— ``run`` 是历史的那个入口，另两个各有自己的夹具。"""
     return await _run(list_module.run_history, tmp_path, **kwargs)
 
 
-async def run_bookmarks(tmp_path: Path, **kwargs: object) -> ListReport:
+async def run_bookmarks(tmp_path: Path, **kwargs: object) -> BookmarksReport:
     return await _run(list_module.run_bookmarks, tmp_path, **kwargs)
 
 
-async def run_tabs(tmp_path: Path, **kwargs: object) -> ListReport:
+async def run_tabs(tmp_path: Path, **kwargs: object) -> TabsReport:
     return await _run(list_module.run_tabs, tmp_path, **kwargs)
 
 
@@ -264,7 +278,7 @@ async def test_output_carries_format_version_and_filters(tmp_path: Path) -> None
     await build_db(tmp_path, [history_record("rec")])
 
     report = await run(tmp_path, domain="example.com")
-    payload = json.loads(report.to_json())
+    payload = json.loads(to_json(report))
 
     assert "format_version" in payload
     assert payload["filters"]["domain"] == "example.com"
@@ -278,7 +292,7 @@ async def test_never_synced_says_so_instead_of_pretending(tmp_path: Path) -> Non
     await build_db(tmp_path, [history_record("rec")])
 
     report = await run(tmp_path)
-    payload = json.loads(report.to_json())
+    payload = json.loads(to_json(report))
 
     assert report.synced_at is None
     assert report.age_seconds is None
@@ -709,13 +723,13 @@ async def test_firefox_visit_borrows_the_sync_title_when_it_has_none(tmp_path: P
 
 
 async def test_format_version_bumped_for_the_new_shape(tmp_path: Path) -> None:
-    """形状变过三次：``source`` / ``source_machine``（2）、数据新鲜度（3）、
-    ``source`` 取值与 ``firefox_records`` 改名（4）—— 每次都报出来。"""
+    """形状变过四次：``source`` / ``source_machine``（2）、数据新鲜度（3）、
+    ``source`` 取值与 ``firefox_records`` 改名（4）、报告拆成三份互不继承的类型（5）。"""
     await build_db(tmp_path, [history_record("rec")])
 
     report = await run(tmp_path)
 
-    assert report.format_version == 4
+    assert report.format_version == 5
 
 
 async def test_json_shape_of_a_merged_row(tmp_path: Path) -> None:
@@ -723,7 +737,7 @@ async def test_json_shape_of_a_merged_row(tmp_path: Path) -> None:
     await add_firefox(tmp_path, [firefox_visit("https://both.test/", when=DAY)])
 
     report = await run(tmp_path)
-    payload = json.loads(report.to_json())
+    payload = json.loads(to_json(report))
 
     assert payload["sources"] == ["sync", "firefox"]
     assert payload["firefox_records"] == 1
@@ -841,7 +855,7 @@ async def test_bookmark_json_is_serializable_with_iso_times(tmp_path: Path) -> N
     )
 
     report = await run_bookmarks(tmp_path)
-    payload = json.loads(report.to_json())
+    payload = json.loads(to_json(report))
 
     assert payload["tree"][0]["children"][0]["added_at"] == "2026-09-13T12:00:00+00:00"
 
@@ -1098,6 +1112,151 @@ async def test_tabs_json_is_serializable_with_iso_times(tmp_path: Path) -> None:
     )
 
     report = await run_tabs(tmp_path)
-    payload = json.loads(report.to_json())
+    payload = json.loads(to_json(report))
 
     assert payload["clients"][0]["tabs"][0]["last_used_at"] == "2023-11-14T22:13:20+00:00"
+
+
+V4_JSON_KEYS: dict[str, set[str]] = {
+    "history": {
+        "format_version",
+        "data_type",
+        "generated_at",
+        "filters",
+        "records",
+        "synced_at",
+        "age_seconds",
+        "visits",
+        "firefox_records",
+        "sources",
+        "skipped",
+        "skipped_details",
+        "notes",
+        "matched",
+        "returned",
+        "items",
+    },
+    "bookmarks": {
+        "format_version",
+        "data_type",
+        "generated_at",
+        "filters",
+        "records",
+        "synced_at",
+        "age_seconds",
+        "firefox_records",
+        "sources",
+        "skipped",
+        "skipped_details",
+        "notes",
+        "matched",
+        "returned",
+        "tree",
+        "counts",
+    },
+    "tabs": {
+        "format_version",
+        "data_type",
+        "generated_at",
+        "filters",
+        "records",
+        "synced_at",
+        "age_seconds",
+        "firefox_records",
+        "sources",
+        "skipped",
+        "skipped_details",
+        "notes",
+        "matched",
+        "returned",
+        "clients",
+    },
+}
+"""v4 的 JSON 键集合 —— 拆模型只是让每份报告**只声明自己的字段**，形状逐字段不变。"""
+
+
+def test_the_three_reports_have_no_common_base() -> None:
+    """三份报告互不继承 —— 共享的是形状，用 union 表达。"""
+    assert HistoryReport.__bases__ == (BaseModel,)
+    assert BookmarksReport.__bases__ == (BaseModel,)
+    assert TabsReport.__bases__ == (BaseModel,)
+    assert set(get_args(ListReport.__value__)) == {HistoryReport, BookmarksReport, TabsReport}
+
+
+@pytest.mark.parametrize("data_type", ["history", "bookmarks", "tabs"])
+async def test_json_key_set_matches_v4(tmp_path: Path, data_type: str) -> None:
+    """拆成三份模型后 JSON 仍是 v4 的扁平形状，只动 ``format_version``。"""
+    if data_type == "history":
+        await build_db(tmp_path, [history_record("rec")])
+        report = await run(tmp_path)
+    elif data_type == "bookmarks":
+        await build_db(
+            tmp_path,
+            [],
+            bookmarks=[bookmark_record("bmk", parent_id=None, title="示例")],
+        )
+        report = await run_bookmarks(tmp_path)
+    else:
+        await build_db(tmp_path, [], tabs=[tabs_record("dev")])
+        report = await run_tabs(tmp_path)
+
+    payload = json.loads(to_json(report))
+
+    assert set(payload) == V4_JSON_KEYS[data_type]
+    assert payload["format_version"] == 5
+
+
+def test_reports_carry_no_to_json_method() -> None:
+    """序列化暂时是 ``list/report.py`` 的自由函数，不挂在报告模型上（06 收进 ``render.py``）。"""
+    report = HistoryReport(
+        data_type="history",
+        generated_at="2026-09-13T17:30:12+00:00",
+        filters={},
+        records=0,
+        skipped=0,
+        matched=0,
+        returned=0,
+    )
+
+    assert json.loads(to_json(report))["format_version"] == 5
+    assert not hasattr(report, "to_json")
+
+
+def test_model_fields_and_notes_defaults() -> None:
+    """直接构造三份模型 —— 共有字段齐全，``notes`` / ``skipped_details`` 默认空。"""
+    history = HistoryReport(
+        data_type="history",
+        generated_at="2026-09-13T17:30:12+00:00",
+        filters={},
+        records=0,
+        skipped=0,
+        matched=0,
+        returned=0,
+    )
+    bookmarks = BookmarksReport(
+        data_type="bookmarks",
+        generated_at="2026-09-13T17:30:12+00:00",
+        filters={},
+        records=0,
+        skipped=0,
+        matched=0,
+        returned=0,
+    )
+    tabs = TabsReport(
+        data_type="tabs",
+        generated_at="2026-09-13T17:30:12+00:00",
+        filters={},
+        records=0,
+        skipped=0,
+        matched=0,
+        returned=0,
+    )
+
+    for report in (history, bookmarks, tabs):
+        assert report.format_version == 5
+        assert report.synced_at is None
+        assert report.age_seconds is None
+        assert report.notes == []
+        assert report.skipped_details == []
+        assert report.sources == []
+        assert report.firefox_records == 0
