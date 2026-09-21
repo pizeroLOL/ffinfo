@@ -409,8 +409,6 @@ firefox 源是空的（目标机器没导入过）就自然降级成单源。**�
 
 ## 5. TODO（明确推迟，不在首版范围）
 
-- [ ] **CLI 用户化**（`-h` / 补全 / `-j` / `list` 子命令 / `sync` 默认全拉）—— 设计见 §9；
-      工单 8 张在 `.scratch/cli-user-facing/`（本地，不入版本控制）
 - [ ] **TUI**（交互式浏览）
 - [ ] **趋势 / 统计**（Top 域名、时段分布、每日趋势）
 - [ ] **申请自己的 `client_id`**
@@ -508,7 +506,8 @@ cd application-services && git sparse-checkout set components/places components/
 > `--json/-j`、`sync` 默认同步除 `forms` 外的全部、`list` 变子命令。
 > 下面按架构评审的候选逐条落地 —— §9.1 起每节一个候选；评审报告本身在临时目录，不入版本控制。
 >
-> **状态**：设计已敲定，**尚未实现**（§9.1–§9.5）。
+> **状态**：**已实现**（2026-09-21）—— 工单 `.scratch/cli-user-facing/` 8 票全部 done；
+> 532 passed / ruff / pyright 全绿。实现时发现的边界与待收口项记在该目录的 `todo.md`。
 
 ### 9.1 `list` 子命令化（候选 1）
 
