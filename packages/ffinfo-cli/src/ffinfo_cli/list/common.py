@@ -107,6 +107,11 @@ class ListReport(BaseModel):
     skipped: int
     """没能进结果的记录条数（解密失败、或建树时丢弃的病态记录）—— 单条坏掉不连坐。"""
     skipped_details: list[dict[str, str]] = []
+    notes: list[str] = []
+    """结果为空但**不是失败**时的提示 —— 比如 ``--path`` / ``--device`` 什么都没命中。
+
+    数据相关，不是用法错误：agent 不该靠退出码猜库里有没有这个文件夹 / 设备。
+    退出码照旧 0，报告里给一句话。"""
     matched: int
     """过滤之后剩多少条 —— history 是访问次数、bookmarks 是书签条数、tabs 是标签页数
     （文件夹与设备是结构，不计）。"""
@@ -153,14 +158,15 @@ async def load_shell(
     *,
     database_path: Path,
     collection: str,
-    since: datetime | None,
-    domain: str | None,
-    search: str | None,
-    limit: int | None,
+    filters: dict[str, str | int | None],
     warn: Callable[[str], None] | None,
     clock: Callable[[], float],
 ) -> Shell:
-    """读库、读 firefox 源、拼出报告公共字段 —— 三个入口唯一会重复的一步。"""
+    """读库、读 firefox 源、拼出报告公共字段 —— 三个入口唯一会重复的一步。
+
+    ``filters`` 是**这个类型自己的键**（history 是 ``since`` / ``domain`` / ``search`` / ``limit``，
+    bookmarks 是 ``path`` / ``limit``，tabs 是 ``device`` / ``limit``）—— 口径由各自的入口拼。
+    """
     store = await open_database(database_path, warn=warn)
     records = await store.load_records(collection)
     # firefox 源只有历史这一种 —— 书签与标签页是云端独有
@@ -179,12 +185,7 @@ async def load_shell(
             else None
         ),
         "age_seconds": round(now - cursor.synced_at, 1) if cursor is not None else None,
-        "filters": {
-            "since": since.isoformat() if since is not None else None,
-            "domain": domain,
-            "search": search,
-            "limit": limit,
-        },
+        "filters": filters,
         "records": len(records),
     }
     return Shell(store=store, records=records, firefox=firefox, common=common)
@@ -275,7 +276,8 @@ def keeper(
 ) -> Callable[..., bool]:
     """把 ``--since`` / ``--domain`` / ``--search`` 绑成一个谓词 —— **口径只写这一处**。
 
-    三种数据类型各提供自己的字段（``when`` / ``url`` / ``title``）；``when`` 缺失算不匹配
+    只有 ``history`` 用语义过滤（bookmarks / tabs 改成了结构性的 ``--path`` / ``--device``）；
+    它提供自己的字段（``when`` / ``url`` / ``title``）；``when`` 缺失算不匹配
     （没有时间的记录进不了"某时间之后"）。三个过滤器一起作用，不是逐个筛。
     """
 

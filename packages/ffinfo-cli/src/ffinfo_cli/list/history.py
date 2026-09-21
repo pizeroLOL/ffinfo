@@ -51,10 +51,12 @@ async def run_history(
     shell = await load_shell(
         database_path=database_path,
         collection="history",
-        since=since,
-        domain=domain,
-        search=search,
-        limit=limit,
+        filters={
+            "since": since.isoformat() if since is not None else None,
+            "domain": domain,
+            "search": search,
+            "limit": limit,
+        },
         warn=warn,
         clock=clock,
     )

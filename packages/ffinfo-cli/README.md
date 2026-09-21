@@ -19,7 +19,8 @@ ffinfo-cli profiles             # 查看本地状态（profile、密钥、各 co
 ```
 
 `list` 是子命令组：`history` / `bookmarks` / `tabs` 三种类型各一个，取代了旧的
-`list --data-type X`。目前三类共用 `--since` / `--domain` / `--search` / `--limit`。
+`list --data-type X`。筛选项按类型各给一套：`history` 是 `--since` / `--domain` / `--search`，
+`bookmarks` 是 `--path`（命中后从该文件夹重新生根），`tabs` 是 `--device`；`--limit` 三类都有。
 **没有 `--json` 这个开关** —— 输出本来就是 JSON，成功时 stdout 上只有那份结果。
 
 失败时 stdout 是空的：stderr 上是机器可读的错误 JSON（`{"error": {"code", "message"}}`），

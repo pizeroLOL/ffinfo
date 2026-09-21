@@ -1,6 +1,7 @@
 """``ffinfo-cli list bookmarks`` —— 建树 / 剪枝，保留父子层级。
 
 书签的父子层级就是主要信息，拍平就没了。所以输出是一棵**树**，
+``--path`` 按 ``/`` 分隔的文件夹标题命中后从命中文件夹**重新生根**（祖先不带），
 ``--limit`` 数的是书签条数（文件夹是挂书签用的结构，不占名额）。
 """
 
@@ -9,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable, Sequence
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +20,6 @@ from ffinfo_cli.list.common import (
     cloud_key,
     details,
     guard_all_failed,
-    keeper,
     load_shell,
     truncate,
 )
@@ -31,21 +30,16 @@ async def run_bookmarks(
     identity_path: Path,
     credentials_path: Path,
     database_path: Path,
-    since: datetime | None = None,
-    domain: str | None = None,
-    search: str | None = None,
+    path: str | None = None,
     limit: int | None = None,
     warn: Callable[[str], None] | None = None,
     clock: Callable[[], float] = time.time,
 ) -> ListReport:
-    """读库 → 解密 → 建树 → 过滤 → 出报告。全程不联网。"""
+    """读库 → 解密 → 建树 → 按路径选根 → 出报告。全程不联网。"""
     shell = await load_shell(
         database_path=database_path,
         collection="bookmarks",
-        since=since,
-        domain=domain,
-        search=search,
-        limit=limit,
+        filters={"path": path, "limit": limit},
         warn=warn,
         clock=clock,
     )
@@ -55,9 +49,7 @@ async def run_bookmarks(
         credentials_path=credentials_path,
         collection="bookmarks",
     )
-    return _bookmark_report(
-        shell.records, key, shell.common, since=since, domain=domain, search=search, limit=limit
-    )
+    return _bookmark_report(shell.records, key, shell.common, path=path, limit=limit)
 
 
 def _bookmark_report(
@@ -65,12 +57,10 @@ def _bookmark_report(
     key: KeyBundle,
     common: dict[str, Any],
     *,
-    since: datetime | None,
-    domain: str | None,
-    search: str | None,
+    path: str | None,
     limit: int | None,
 ) -> ListReport:
-    """书签：**保留树**。过滤只作用在书签上，筛空的文件夹跟着剪掉。
+    """书签：**保留树**。``--path`` 命中后从命中文件夹重新生根，祖先剪掉。
 
     ``--limit`` 数的是**书签条数** —— 文件夹是挂书签用的结构，不占名额
     （与 tabs 那边"设备不占名额"一个道理）。最终树、``returned`` 与
@@ -79,27 +69,60 @@ def _bookmark_report(
     decrypted = parse_bookmarks(records, key)
     guard_all_failed(decrypted.records, len(decrypted.roots), len(decrypted.skipped))
 
-    matches = keeper(since=since, domain=domain, search=search)
+    notes: list[str] = []
+    if path is not None:
+        roots = _select_by_path(decrypted.roots, path)
+        if not roots:
+            notes.append(f"没有匹配路径「{path}」的文件夹")
+    else:
+        roots = list(decrypted.roots)
 
-    def keep(node: BookmarkNode) -> bool:
-        return matches(when=node.added_at, url=node.url, title=node.title)
-
-    filtered = _prune(decrypted.roots, keep)
-    bookmarks = [node for node in _flatten(filtered) if node.type != "folder"]
+    bookmarks = [node for node in _flatten(roots) if node.type != "folder"]
     returned = truncate(bookmarks, limit)
     kept_ids = {node.id for node in returned}
-    tree = _prune(filtered, lambda node: node.id in kept_ids)
+    tree = _prune(roots, lambda node: node.id in kept_ids)
     not_in_tree = decrypted.skipped + decrypted.dropped
 
     return ListReport(
         **common,
         skipped=len(not_in_tree),
         skipped_details=details(not_in_tree),
+        notes=notes,
         matched=len(bookmarks),
         returned=len(returned),
         tree=tree,
         counts=_counts(tree),
     )
+
+
+def _select_by_path(nodes: Sequence[BookmarkNode], path: str) -> list[BookmarkNode]:
+    """按 ``/`` 分隔的**文件夹标题**路径找节点 —— 精确匹配、区分大小写、同名全收。
+
+    路径从任意 root 起算（root 标题也是第一段 —— Firefox 的 root 名是本地化的，
+    不能写死「Bookmarks Toolbar」），首尾斜杠忽略。只有文件夹能作为路径段；
+    命中后整棵子树归它，不再往下找同路径的孙文件夹。
+
+    **迭代版**（显式栈）—— 与 ``bookmarks.build_tree`` / ``_prune`` 同一条防线。
+    """
+    target = tuple(segment for segment in path.split("/") if segment)
+    if not target:
+        return []
+    found: list[BookmarkNode] = []
+    stack: list[tuple[BookmarkNode, tuple[str, ...]]] = [
+        (node, (node.title,)) for node in reversed(list(nodes))
+    ]
+    while stack:
+        node, trail = stack.pop()
+        if len(trail) > len(target) or trail != target[: len(trail)]:
+            continue
+        if trail == target:
+            if node.type == "folder":
+                found.append(node)
+            continue
+        if node.type != "folder":
+            continue
+        stack.extend((child, (*trail, child.title)) for child in reversed(node.children))
+    return found
 
 
 def _prune(
@@ -155,9 +178,7 @@ def list_bookmarks_blocking(
     identity_path: Path,
     credentials_path: Path,
     database_path: Path,
-    since: datetime | None = None,
-    domain: str | None = None,
-    search: str | None = None,
+    path: str | None = None,
     limit: int | None = None,
     warn: Callable[[str], None] | None = None,
 ) -> ListReport:
@@ -167,9 +188,7 @@ def list_bookmarks_blocking(
             identity_path=identity_path,
             credentials_path=credentials_path,
             database_path=database_path,
-            since=since,
-            domain=domain,
-            search=search,
+            path=path,
             warn=warn,
             limit=limit,
         )

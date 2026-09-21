@@ -777,29 +777,6 @@ async def test_bookmark_limit_counts_bookmarks_not_folders(tmp_path: Path) -> No
     assert report.counts == {"folder": 1, "bookmark": 1}
 
 
-async def test_bookmark_filters_prune_empty_folders(tmp_path: Path) -> None:
-    await build_db(
-        tmp_path,
-        [],
-        bookmarks=[
-            bookmark_record("tools", kind="folder", parent_id=None, title="工具", url=None),
-            bookmark_record(
-                "keep", parent_id="tools", title="Rust 笔记", url="https://rust-lang.org/"
-            ),
-            bookmark_record("drop", parent_id="tools", title="别家", url="https://other.test/"),
-            bookmark_record("empty", kind="folder", parent_id=None, title="空文件夹", url=None),
-        ],
-    )
-
-    report = await run_bookmarks(tmp_path, domain="rust-lang.org")
-
-    assert report.returned == 1
-    assert report.matched == 1
-    assert [node.id for node in report.tree] == ["tools"]
-    assert report.tree[0].children[0].id == "keep"
-    assert report.counts == {"folder": 1, "bookmark": 1}
-
-
 async def test_bookmark_limit_uses_the_budget_on_bookmarks(tmp_path: Path) -> None:
     await build_db(
         tmp_path,
@@ -869,6 +846,123 @@ async def test_bookmark_json_is_serializable_with_iso_times(tmp_path: Path) -> N
     assert payload["tree"][0]["children"][0]["added_at"] == "2026-09-13T12:00:00+00:00"
 
 
+async def _build_nested_bookmarks(tmp_path: Path) -> None:
+    """一棵多层书签树 —— ``--path`` 的祖先链 / 重新生根全靠它。
+
+    ``书签工具栏`` ─┬─ ``工具`` ─┬─ A（书签）
+                     │           └─ ``子`` ── B（书签）
+                     └─ X（书签）
+    ``其他书签``   ─── ``工具`` ─── C（书签）
+    """
+    await build_db(
+        tmp_path,
+        [],
+        bookmarks=[
+            bookmark_record("toolbar", kind="folder", parent_id=None, title="书签工具栏", url=None),
+            bookmark_record("tools", kind="folder", parent_id="toolbar", title="工具", url=None),
+            bookmark_record("a", parent_id="tools", title="A", url="https://a.test/"),
+            bookmark_record("nested", kind="folder", parent_id="tools", title="子", url=None),
+            bookmark_record("b", parent_id="nested", title="B", url="https://b.test/"),
+            bookmark_record("x", parent_id="toolbar", title="X", url="https://x.test/"),
+            bookmark_record("menu", kind="folder", parent_id=None, title="其他书签", url=None),
+            bookmark_record("tools2", kind="folder", parent_id="menu", title="工具", url=None),
+            bookmark_record("c", parent_id="tools2", title="C", url="https://c.test/"),
+        ],
+    )
+
+
+async def test_bookmark_path_reroots_at_the_matched_folder(tmp_path: Path) -> None:
+    """命中的文件夹当根，祖先一律剪掉 —— 上下文由 ``filters.path`` 表达。"""
+    await _build_nested_bookmarks(tmp_path)
+
+    report = await run_bookmarks(tmp_path, path="书签工具栏/工具")
+
+    assert [node.id for node in report.tree] == ["tools"]
+    assert report.tree[0].children[0].id == "a"
+    assert report.tree[0].children[1].id == "nested"
+    assert report.tree[0].children[1].children[0].id == "b"
+    assert report.returned == 2
+    assert report.matched == 2
+    assert report.counts == {"folder": 2, "bookmark": 2}
+    assert report.notes == []
+
+
+async def test_bookmark_path_can_match_a_root(tmp_path: Path) -> None:
+    """根名本地化 —— 路径可以是「书签工具栏」本身。"""
+    await _build_nested_bookmarks(tmp_path)
+
+    report = await run_bookmarks(tmp_path, path="书签工具栏")
+
+    assert [node.id for node in report.tree] == ["toolbar"]
+    assert report.returned == 3
+
+
+async def test_bookmark_path_ignores_leading_and_trailing_slashes(tmp_path: Path) -> None:
+    await _build_nested_bookmarks(tmp_path)
+
+    report = await run_bookmarks(tmp_path, path="/书签工具栏/工具/")
+
+    assert [node.id for node in report.tree] == ["tools"]
+
+
+async def test_bookmark_path_returns_every_folder_with_that_name(tmp_path: Path) -> None:
+    """同名文件夹命中多个都返回 —— 两个兄弟都叫「工具」。"""
+    await build_db(
+        tmp_path,
+        [],
+        bookmarks=[
+            bookmark_record("root", kind="folder", parent_id=None, title="根", url=None),
+            bookmark_record("t1", kind="folder", parent_id="root", title="工具", url=None),
+            bookmark_record("t2", kind="folder", parent_id="root", title="工具", url=None),
+            bookmark_record("a", parent_id="t1", title="A", url="https://a.test/"),
+            bookmark_record("b", parent_id="t2", title="B", url="https://b.test/"),
+        ],
+    )
+
+    report = await run_bookmarks(tmp_path, path="根/工具")
+
+    assert [node.id for node in report.tree] == ["t1", "t2"]
+    assert report.returned == 2
+
+
+async def test_bookmark_path_is_exact_and_case_sensitive(tmp_path: Path) -> None:
+    await build_db(
+        tmp_path,
+        [],
+        bookmarks=[
+            bookmark_record("root", kind="folder", parent_id=None, title="根", url=None),
+            bookmark_record("tools", kind="folder", parent_id="root", title="Tools", url=None),
+            bookmark_record("a", parent_id="tools", title="A", url="https://a.test/"),
+        ],
+    )
+
+    assert (await run_bookmarks(tmp_path, path="根/tools")).tree == []
+    assert (await run_bookmarks(tmp_path, path="根/Tool")).tree == []
+    assert [node.id for node in (await run_bookmarks(tmp_path, path="根/Tools")).tree] == ["tools"]
+
+
+async def test_bookmark_path_no_match_is_empty_with_a_note(tmp_path: Path) -> None:
+    """没有这个文件夹是数据事实、不是用法错误 —— 空结果 + ``notes``，退出码照旧。"""
+    await _build_nested_bookmarks(tmp_path)
+
+    report = await run_bookmarks(tmp_path, path="不存在")
+
+    assert report.tree == []
+    assert report.matched == 0
+    assert report.returned == 0
+    assert len(report.notes) == 1
+    assert "不存在" in report.notes[0]
+
+
+async def test_bookmark_path_limit_still_counts_only_bookmarks(tmp_path: Path) -> None:
+    await _build_nested_bookmarks(tmp_path)
+
+    report = await run_bookmarks(tmp_path, path="书签工具栏/工具", limit=1)
+
+    assert report.returned == 1
+    assert report.matched == 2
+
+
 async def test_tabs_are_grouped_by_client(tmp_path: Path) -> None:
     await build_db(
         tmp_path,
@@ -908,81 +1002,88 @@ async def test_tabs_limit_counts_tabs_not_clients(tmp_path: Path) -> None:
     assert [tab.title for tab in report.clients[0].tabs] == ["一", "二"]
 
 
-async def test_the_same_filter_semantics_apply_to_all_three_types(tmp_path: Path) -> None:
-    """``--domain`` / ``--since`` / ``--search`` 在三种数据类型上是**同一套**语义。
-
-    口径只写一遍（``_keeper``）—— R5 那类"三个数自相矛盾"就是从三份拷贝里长出来的。
-    """
-    await build_db(
-        tmp_path,
-        [
-            history_record("hit", url="https://example.com/"),
-            history_record("miss", url="https://other.test/"),
-        ],
-        bookmarks=[
-            bookmark_record("b-hit", parent_id=None, url="https://example.com/"),
-            bookmark_record("b-miss", parent_id=None, url="https://other.test/"),
-        ],
-        tabs=[
-            tabs_record(
-                "dev",
-                client_name="alpha",
-                entries=[("一", "https://example.com/", 1), ("二", "https://other.test/", 2)],
-            )
-        ],
-    )
-
-    history = await run(tmp_path, domain="example.com")
-    bookmarks = await run_bookmarks(tmp_path, domain="example.com")
-    tabs = await run_tabs(tmp_path, domain="example.com")
-
-    assert [item.record_id for item in history.items] == ["hit"]
-    assert [node.id for node in bookmarks.tree] == ["b-hit"]
-    assert [tab.url for client in tabs.clients for tab in client.tabs] == ["https://example.com/"]
-
-
-async def test_bookmark_since_filter_compares_real_times(tmp_path: Path) -> None:
-    """``--since`` 对书签走真时间比较 —— 与 history 同一个口径。"""
-    await build_db(
-        tmp_path,
-        [],
-        bookmarks=[
-            bookmark_record(
-                "old", parent_id=None, title="旧", date_added=ADDED_MILLIS - 86_400_000
-            ),
-            bookmark_record(
-                "new", parent_id=None, title="新", date_added=ADDED_MILLIS + 86_400_000
-            ),
-        ],
-    )
-
-    report = await run_bookmarks(tmp_path, since=DAY)
-
-    assert [node.id for node in report.tree] == ["new"]
-    assert report.returned == 1
-
-
-async def test_tabs_since_filter_compares_real_times(tmp_path: Path) -> None:
-    seconds = int(DAY.timestamp())
+async def test_tabs_device_matches_client_name_case_insensitively(tmp_path: Path) -> None:
     await build_db(
         tmp_path,
         [],
         tabs=[
-            tabs_record(
-                "dev",
-                client_name="alpha",
-                entries=[
-                    ("旧", "https://a.test/", seconds - 3_600),
-                    ("新", "https://b.test/", seconds + 3_600),
-                ],
-            ),
+            tabs_record("dev1", client_name="Alpha", entries=[("一", "https://a.test/", 1)]),
+            tabs_record("dev2", client_name="beta", entries=[("二", "https://b.test/", 2)]),
         ],
     )
 
-    report = await run_tabs(tmp_path, since=DAY)
+    report = await run_tabs(tmp_path, device="alpha")
 
-    assert [tab.title for tab in report.clients[0].tabs] == ["新"]
+    assert [client.client_name for client in report.clients] == ["Alpha"]
+
+
+async def test_tabs_device_matches_client_id(tmp_path: Path) -> None:
+    await build_db(
+        tmp_path,
+        [],
+        tabs=[
+            tabs_record("dev1", client_name="Alpha", entries=[("一", "https://a.test/", 1)]),
+            tabs_record("dev2", client_name="beta", entries=[("二", "https://b.test/", 2)]),
+        ],
+    )
+
+    report = await run_tabs(tmp_path, device="dev2")
+
+    assert [client.client_id for client in report.clients] == ["dev2"]
+
+
+async def test_tabs_device_is_not_a_substring_match(tmp_path: Path) -> None:
+    """不做子串 —— 一个子串命中多台会让「筛的是哪台」变含糊。"""
+    await build_db(
+        tmp_path,
+        [],
+        tabs=[
+            tabs_record("dev1", client_name="alpha", entries=[("一", "https://a.test/", 1)]),
+        ],
+    )
+
+    report = await run_tabs(tmp_path, device="alp")
+
+    assert report.clients == []
+
+
+async def test_tabs_device_no_match_is_empty_with_a_note(tmp_path: Path) -> None:
+    await build_db(
+        tmp_path,
+        [],
+        tabs=[
+            tabs_record("dev1", client_name="alpha", entries=[("一", "https://a.test/", 1)]),
+        ],
+    )
+
+    report = await run_tabs(tmp_path, device="nope")
+
+    assert report.clients == []
+    assert report.matched == 0
+    assert report.returned == 0
+    assert len(report.notes) == 1
+    assert "nope" in report.notes[0]
+
+
+async def test_tabs_device_limit_counts_tabs_not_clients(tmp_path: Path) -> None:
+    await build_db(
+        tmp_path,
+        [],
+        tabs=[
+            tabs_record(
+                "dev1",
+                client_name="alpha",
+                entries=[("一", "https://a.test/", 1), ("二", "https://b.test/", 2)],
+            ),
+            tabs_record("dev2", client_name="beta", entries=[("三", "https://c.test/", 3)]),
+        ],
+    )
+
+    report = await run_tabs(tmp_path, device="alpha", limit=1)
+
+    assert report.matched == 2
     assert report.returned == 1
+    assert [client.client_name for client in report.clients] == ["alpha"]
 
 
 async def test_tabs_json_is_serializable_with_iso_times(tmp_path: Path) -> None:

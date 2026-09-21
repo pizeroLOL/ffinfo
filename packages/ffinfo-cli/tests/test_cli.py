@@ -88,6 +88,17 @@ def test_data_type_option_is_rejected() -> None:
     assert result.exit_code == 2
 
 
+def test_per_type_filters_are_not_shared_across_subcommands() -> None:
+    """筛选项按类型各给一套 —— 别的子命令不认这些选项（用法错误、退出 2）。"""
+    assert runner.invoke(app, ["list", "history", "--path", "书签工具栏"]).exit_code == 2
+    assert runner.invoke(app, ["list", "history", "--device", "alpha"]).exit_code == 2
+    assert runner.invoke(app, ["list", "tabs", "--path", "x"]).exit_code == 2
+    assert runner.invoke(app, ["list", "bookmarks", "--device", "x"]).exit_code == 2
+    for subcommand in ("bookmarks", "tabs"):
+        for option in ("--since", "--domain", "--search"):
+            assert runner.invoke(app, ["list", subcommand, option, "x"]).exit_code == 2
+
+
 def test_list_subcommands_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """三种数据类型各是一个子命令 —— 空库也照样出报告、退出 0。"""
     for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA"):

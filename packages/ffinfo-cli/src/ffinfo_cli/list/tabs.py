@@ -1,5 +1,6 @@
 """``ffinfo-cli list tabs`` —— 按设备分组，一个 BSO 就是一台设备。
 
+``--device`` 按 ``clientName``（不区分大小写）或 ``clientId`` **精确**匹配（不做子串）。
 ``--limit`` 数的是标签页条数 —— 设备是分组的结构，不占名额
 （与 bookmarks 那边"文件夹不占名额"一个道理）。
 """
@@ -9,18 +10,16 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable, Sequence
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from ffinfo.crypto import KeyBundle
-from ffinfo.tabs import ClientTabs, TabEntry, parse_tabs
+from ffinfo.tabs import ClientTabs, parse_tabs
 from ffinfo_cli.list.common import (
     ListReport,
     cloud_key,
     details,
     guard_all_failed,
-    keeper,
     load_shell,
 )
 
@@ -30,21 +29,16 @@ async def run_tabs(
     identity_path: Path,
     credentials_path: Path,
     database_path: Path,
-    since: datetime | None = None,
-    domain: str | None = None,
-    search: str | None = None,
+    device: str | None = None,
     limit: int | None = None,
     warn: Callable[[str], None] | None = None,
     clock: Callable[[], float] = time.time,
 ) -> ListReport:
-    """读库 → 解密 → 分组 → 过滤 → 出报告。全程不联网。"""
+    """读库 → 解密 → 按设备选 → 分组 → 出报告。全程不联网。"""
     shell = await load_shell(
         database_path=database_path,
         collection="tabs",
-        since=since,
-        domain=domain,
-        search=search,
-        limit=limit,
+        filters={"device": device, "limit": limit},
         warn=warn,
         clock=clock,
     )
@@ -54,9 +48,7 @@ async def run_tabs(
         credentials_path=credentials_path,
         collection="tabs",
     )
-    return _tabs_report(
-        shell.records, key, shell.common, since=since, domain=domain, search=search, limit=limit
-    )
+    return _tabs_report(shell.records, key, shell.common, device=device, limit=limit)
 
 
 def _tabs_report(
@@ -64,29 +56,19 @@ def _tabs_report(
     key: KeyBundle,
     common: dict[str, Any],
     *,
-    since: datetime | None,
-    domain: str | None,
-    search: str | None,
+    device: str | None,
     limit: int | None,
 ) -> ListReport:
-    """标签页：按设备分组。过滤只作用在标签页上，筛空的设备跟着去掉。"""
+    """标签页：按设备分组。``--device`` 只留下命中的那台；没命中就空结果 + ``notes``。"""
     decrypted = parse_tabs(records, key)
     guard_all_failed(decrypted.records, len(decrypted.clients), len(decrypted.skipped))
 
-    matches = keeper(since=since, domain=domain, search=search)
-
-    def keep(entry: TabEntry) -> bool:
-        return matches(when=entry.last_used_at, url=entry.url, title=entry.title)
-
-    clients = [
-        ClientTabs(
-            client_id=client.client_id,
-            client_name=client.client_name,
-            tabs=tuple(tab for tab in client.tabs if keep(tab)),
-        )
-        for client in decrypted.clients
-    ]
-    clients = [client for client in clients if client.tabs]
+    notes: list[str] = []
+    clients = list(decrypted.clients)
+    if device is not None:
+        clients = [client for client in clients if _device_matches(client, device)]
+        if not clients:
+            notes.append(f"没有匹配设备「{device}」的设备")
     matched = sum(client.count for client in clients)
 
     if limit is not None:
@@ -106,10 +88,17 @@ def _tabs_report(
         **common,
         skipped=len(decrypted.skipped),
         skipped_details=details(decrypted.skipped),
+        notes=notes,
         matched=matched,
         returned=sum(client.count for client in clients),
         clients=clients,
     )
+
+
+def _device_matches(client: ClientTabs, device: str) -> bool:
+    """``clientName``（不区分大小写）**或** ``clientId`` 精确命中。不做子串。"""
+    wanted = device.strip()
+    return client.client_name.casefold() == wanted.casefold() or client.client_id == wanted
 
 
 def list_tabs_blocking(
@@ -117,9 +106,7 @@ def list_tabs_blocking(
     identity_path: Path,
     credentials_path: Path,
     database_path: Path,
-    since: datetime | None = None,
-    domain: str | None = None,
-    search: str | None = None,
+    device: str | None = None,
     limit: int | None = None,
     warn: Callable[[str], None] | None = None,
 ) -> ListReport:
@@ -129,9 +116,7 @@ def list_tabs_blocking(
             identity_path=identity_path,
             credentials_path=credentials_path,
             database_path=database_path,
-            since=since,
-            domain=domain,
-            search=search,
+            device=device,
             warn=warn,
             limit=limit,
         )

@@ -1,8 +1,9 @@
 """``ffinfo-cli list`` —— 查询浏览数据，三种类型各是一个子命令。
 
 ``list history`` / ``list bookmarks`` / ``list tabs`` 替代了旧的 ``list --data-type X``：
-一个字符串穿过校验、dispatch、字段抹除的那条路已经拆掉。本票内三类**仍共用旧筛选项**
-（``--since`` / ``--domain`` / ``--search`` / ``--limit``），按类型拆筛选项是 03 的事。
+一个字符串穿过校验、dispatch、字段抹除的那条路已经拆掉。筛选项按类型**各给一套** ——
+history 是 ``--since`` / ``--domain`` / ``--search``，bookmarks 是 ``--path``，
+tabs 是 ``--device``；``--limit`` 三类都有。
 """
 
 from __future__ import annotations
@@ -72,28 +73,21 @@ def history(
 
 
 def bookmarks(
-    since: str | None = typer.Option(
+    path: str | None = typer.Option(
         None,
-        "--since",
-        help="只看这个时间之后加入的（YYYY-MM-DD 或 ISO 8601；没写时区就按本机时区算）",
-    ),
-    domain: str | None = typer.Option(None, "--domain", "-d", help="只看这个域名（子域名也算）"),
-    search: str | None = typer.Option(
-        None, "--search", "-s", help="在 URL 和标题里搜（不区分大小写）"
+        "--path",
+        help="只看这个文件夹里的书签（/ 分隔的文件夹标题，从任意 root 起算，区分大小写）",
     ),
     limit: int | None = typer.Option(None, "--limit", "-n", help="最多返回多少条书签"),
 ) -> None:
-    """书签：保留父子层级的树。"""
+    """书签：保留父子层级的树；``--path`` 命中后从该文件夹重新生根。"""
     _check_limit(limit)
-    parsed_since = _parsed_since(since)
     report = guard(
         lambda: list_bookmarks_blocking(
             identity_path=identity_path(),
             credentials_path=credentials_path(),
             database_path=database_path(),
-            since=parsed_since,
-            domain=domain,
-            search=search,
+            path=path,
             limit=limit,
             warn=warn,
         )
@@ -103,28 +97,19 @@ def bookmarks(
 
 
 def tabs(
-    since: str | None = typer.Option(
-        None,
-        "--since",
-        help="只看这个时间之后用过的（YYYY-MM-DD 或 ISO 8601；没写时区就按本机时区算）",
-    ),
-    domain: str | None = typer.Option(None, "--domain", "-d", help="只看这个域名（子域名也算）"),
-    search: str | None = typer.Option(
-        None, "--search", "-s", help="在 URL 和标题里搜（不区分大小写）"
+    device: str | None = typer.Option(
+        None, "--device", help="只看这台设备（设备名不区分大小写，或 clientId；不做子串）"
     ),
     limit: int | None = typer.Option(None, "--limit", "-n", help="最多返回多少个标签页"),
 ) -> None:
-    """标签页：按设备（一台设备一条记录）分组。"""
+    """标签页：按设备（一台设备一条记录）分组；``--device`` 只留命中的那台。"""
     _check_limit(limit)
-    parsed_since = _parsed_since(since)
     report = guard(
         lambda: list_tabs_blocking(
             identity_path=identity_path(),
             credentials_path=credentials_path(),
             database_path=database_path(),
-            since=parsed_since,
-            domain=domain,
-            search=search,
+            device=device,
             limit=limit,
             warn=warn,
         )
