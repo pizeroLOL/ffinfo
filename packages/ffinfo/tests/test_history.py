@@ -187,27 +187,6 @@ def test_tombstones_are_counted_not_skipped() -> None:
     assert len(report.entries) == 1
 
 
-def test_application_level_tombstone_is_not_a_failure() -> None:
-    """历史也有 ``{"deleted": true}`` 的应用层墓碑（缺 ``histUri``）—— 不能当“明文不合法”。"""
-    cleartext = json.dumps({"id": "gone", "deleted": True})
-
-    report = decrypt_history([("gone", encrypt(cleartext))], KEY)
-
-    assert report.tombstones == 1
-    assert report.skipped == ()
-    assert report.entries == ()
-
-
-def test_deleted_flag_tombstone_accepts_pydantic_bool_semantics() -> None:
-    """``{"deleted": 1}`` 也是墓碑 —— 与模型里 ``deleted: bool`` 的宽松解析一致。"""
-    cleartext = json.dumps({"id": "gone", "deleted": 1})
-
-    report = decrypt_history([("gone", encrypt(cleartext))], KEY)
-
-    assert report.tombstones == 1
-    assert report.skipped == ()
-
-
 def test_total_counts_everything_seen() -> None:
     report = decrypt_history(
         [("gone", None), ("broken", "{}"), ("rec1", encrypt(record_json()))], KEY

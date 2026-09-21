@@ -26,9 +26,7 @@ from ffinfo.errors import DecryptionError
 __all__ = ["DecryptBatch", "decrypt_records", "single"]
 
 _DELETED_FLAG: Final[TypeAdapter[bool]] = TypeAdapter(bool)
-"""读明文里的 ``deleted`` —— 复用 pydantic 的 bool 语义（``1`` / ``"true"`` 也算），
-与各 collection 模型里的 ``deleted: bool`` 保持一致。**不能写 ``is True``**：
-那会把 ``deleted: 1`` 的书签当成正常书签展开。"""
+"""读明文里的 ``deleted`` 用的 bool 适配器 —— 见 :func:`_is_deleted`。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,14 +83,9 @@ def decrypt_records[ModelT: BaseModel, ItemT](
         except json.JSONDecodeError as exc:
             skipped.append((record_id, _reason(exc, what)))
             continue
-        if isinstance(decoded, dict) and "deleted" in decoded:
-            try:
-                deleted = _DELETED_FLAG.validate_python(decoded["deleted"])
-            except ValidationError:
-                deleted = False
-            if deleted:
-                tombstones += 1
-                continue
+        if _is_deleted(decoded):
+            tombstones += 1
+            continue
         try:
             record = model.model_validate(decoded)
         except ValidationError as exc:
@@ -103,6 +96,21 @@ def decrypt_records[ModelT: BaseModel, ItemT](
     return DecryptBatch(
         items=tuple(items), skipped=tuple(skipped), tombstones=tombstones, records=seen
     )
+
+
+def _is_deleted(decoded: object) -> bool:
+    """明文是不是应用层墓碑 ``{"deleted": true}``。
+
+    ``deleted`` 用 pydantic 的 bool 语义读（``1`` / ``"true"`` 也算墓碑），与各 collection
+    模型里的 ``deleted: bool`` 保持一致。**不能写 ``is True``** —— 那会把 ``deleted: 1``
+    的书签当成正常书签展开。
+    """
+    if not isinstance(decoded, dict) or "deleted" not in decoded:
+        return False
+    try:
+        return _DELETED_FLAG.validate_python(decoded["deleted"])
+    except ValidationError:
+        return False
 
 
 def _reason(exc: Exception, what: str) -> str:
