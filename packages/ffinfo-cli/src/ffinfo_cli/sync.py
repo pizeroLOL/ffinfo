@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -94,10 +93,6 @@ class SyncReport(BaseModel):
     database: str
     protocol: dict[str, int] = {}
     """顺带拉下来的协议数据，形如 ``{"crypto": 1}``。"""
-
-    def to_json(self) -> str:
-        """给 agent 消费的 JSON。"""
-        return json.dumps(self.model_dump(), ensure_ascii=False, indent=2)
 
 
 def _report_entry(

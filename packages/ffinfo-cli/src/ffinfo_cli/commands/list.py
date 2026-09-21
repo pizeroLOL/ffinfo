@@ -3,7 +3,7 @@
 ``list history`` / ``list bookmarks`` / ``list tabs`` 替代了旧的 ``list --data-type X``：
 一个字符串穿过校验、dispatch、字段抹除的那条路已经拆掉。筛选项按类型**各给一套** ——
 history 是 ``--since`` / ``--domain`` / ``--search``，bookmarks 是 ``--path``，
-tabs 是 ``--device``；``--limit`` 三类都有。
+tabs 是 ``--device``；``--limit`` 三类都有。输出默认人读，``-j/--json`` 切机器 JSON。
 """
 
 from __future__ import annotations
@@ -19,13 +19,13 @@ from ffinfo_cli.list import (
     list_history_blocking,
     list_tabs_blocking,
     parse_since,
-    to_json,
 )
 from ffinfo_cli.paths import credentials_path, database_path, identity_path
+from ffinfo_cli.render import render
 
 list_app = typer.Typer(
     name="list",
-    help="把库里的浏览数据解密后输出 JSON。纯本地，不联网。",
+    help="查询库里的浏览数据。纯本地，不联网；默认人读，-j 输出 JSON。",
     no_args_is_help=True,
 )
 
@@ -43,6 +43,7 @@ def _parsed_since(since: str | None) -> datetime | None:
 
 
 def history(
+    ctx: typer.Context,
     since: str | None = typer.Option(
         None,
         "--since",
@@ -70,10 +71,11 @@ def history(
         )
     )
 
-    typer.echo(to_json(report))
+    typer.echo(render(report, machine=bool(ctx.obj)))
 
 
 def bookmarks(
+    ctx: typer.Context,
     path: str | None = typer.Option(
         None,
         "--path",
@@ -94,10 +96,11 @@ def bookmarks(
         )
     )
 
-    typer.echo(to_json(report))
+    typer.echo(render(report, machine=bool(ctx.obj)))
 
 
 def tabs(
+    ctx: typer.Context,
     device: str | None = typer.Option(
         None, "--device", help="只看这台设备（设备名不区分大小写，或 clientId；不做子串）"
     ),
@@ -116,7 +119,7 @@ def tabs(
         )
     )
 
-    typer.echo(to_json(report))
+    typer.echo(render(report, machine=bool(ctx.obj)))
 
 
 def register(app: typer.Typer) -> None:

@@ -6,9 +6,9 @@
 * :mod:`ffinfo_cli.list.bookmarks` —— 建树 / 剪枝
 * :mod:`ffinfo_cli.list.tabs` —— 按设备分组
 
-三份报告模型各自在自己的模块里（互不继承），``report`` 放 union 别名与临时序列化；
+三份报告模型各自在自己的模块里（互不继承），``report`` 只放 union 别名；
 ``common`` 放三边共用的外壳、过滤口径与契约类型。``--data-type`` 字符串 dispatcher
-已经删掉 —— 一个类型一个入口。
+已经删掉 —— 一个类型一个入口。序列化统一在 ``ffinfo_cli/render.py``。
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from ffinfo_cli.list.history import (
     list_history_blocking,
     run_history,
 )
-from ffinfo_cli.list.report import ListReport, to_json
+from ffinfo_cli.list.report import ListReport
 from ffinfo_cli.list.tabs import TabsReport, list_tabs_blocking, run_tabs
 
 __all__ = [
@@ -47,5 +47,4 @@ __all__ = [
     "run_bookmarks",
     "run_history",
     "run_tabs",
-    "to_json",
 ]

@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 
 from ffinfo_cli.cli import app
 from ffinfo_cli.profiles import LocalPaths, build_report
+from ffinfo_cli.render import render
 from ffinfo_cli.store import open_database
 from support import build_places, host
 
@@ -103,7 +104,7 @@ async def test_json_is_serializable(tmp_path: Path) -> None:
         clock=lambda: NOW,
     )
 
-    payload = json.loads(report.to_json())
+    payload = json.loads(render(report, machine=True))
 
     assert payload["format_version"] == 1
     assert payload["generated_at"] == "2026-09-13T17:30:12+00:00"
@@ -111,11 +112,11 @@ async def test_json_is_serializable(tmp_path: Path) -> None:
 
 
 def test_cli_prints_json_and_exits_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """命令本身：退出码 0 + stdout 上一份 JSON（默认位置被重定向到临时目录）。"""
+    """命令本身：退出码 0 + stdout 上一份 JSON（``-j``；默认是人读摘要）。"""
     for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA"):
         monkeypatch.setenv(name, str(tmp_path / name))
 
-    result = CliRunner().invoke(app, ["profiles"])
+    result = CliRunner().invoke(app, ["-j", "profiles"])
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)

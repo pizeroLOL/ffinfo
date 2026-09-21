@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import sqlite3
 import time
 from collections.abc import Callable
@@ -104,10 +103,6 @@ class ProfilesReport(BaseModel):
     collections: list[CollectionProgress] = []
     notes: list[str] = []
     """下一步能做什么 —— 缺什么说什么。"""
-
-    def to_json(self) -> str:
-        """给 agent 消费的 JSON。"""
-        return json.dumps(self.model_dump(), ensure_ascii=False, indent=2)
 
 
 async def build_report(

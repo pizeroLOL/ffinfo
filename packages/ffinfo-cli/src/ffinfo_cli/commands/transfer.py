@@ -13,6 +13,7 @@ import typer
 from ffinfo_cli.failures import fail_usage, guard, warn
 from ffinfo_cli.paths import database_path
 from ffinfo_cli.places import HostContext
+from ffinfo_cli.render import render
 from ffinfo_cli.transfer import (
     FirefoxImport,
     ImportInput,
@@ -29,6 +30,7 @@ _PROFILE: Final = typer.Option(
 
 
 def export(
+    ctx: typer.Context,
     destination: Path = _DESTINATION,
     profile: Path | None = _PROFILE,
 ) -> None:
@@ -46,10 +48,11 @@ def export(
         )
     )
 
-    typer.echo(report.to_json())
+    typer.echo(render(report, machine=bool(ctx.obj)))
 
 
 def import_command(
+    ctx: typer.Context,
     source: Path | None = _SOURCE,
     from_firefox: bool = typer.Option(
         False,
@@ -82,9 +85,9 @@ def import_command(
         lambda: import_blocking(database_path=database_path(), input=import_input, warn=warn)
     )
 
-    typer.echo(report.to_json())
+    typer.echo(render(report, machine=bool(ctx.obj)))
     for warning in report.warnings:
-        typer.echo(f"警告：{warning}", err=True)
+        warn(warning)
 
 
 def register(app: typer.Typer) -> None:

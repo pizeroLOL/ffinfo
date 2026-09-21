@@ -30,7 +30,7 @@ class TabsReport(BaseModel):
     """``list tabs`` 的输出 —— 按设备分组，一个 BSO 就是一台设备。
 
     与 history / bookmarks 的报告**没有共同基类**：共享的是形状，用 ``report.ListReport``
-    这个 union 表达。序列化暂时是 ``report.to_json`` （06 会收进 ``render.py``）。
+    这个 union 表达。序列化在 ``ffinfo_cli/render.py``。
     """
 
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)

@@ -26,6 +26,7 @@ from ffinfo.credentials import AgeIdentity, CredentialStore
 from ffinfo.errors import AuthError, BackoffError, ConfigurationError, SyncProtocolError
 from ffinfo.keys import OLD_SYNC_SCOPE, ScopedKey
 from ffinfo.oauth import Credentials
+from ffinfo_cli.render import render
 from ffinfo_cli.store import SyncCursor, SyncRecord, open_database
 from ffinfo_cli.sync import SYNCABLE_COLLECTIONS, CollectedSync, SyncReport, run_sync
 
@@ -247,7 +248,7 @@ async def test_report_json_is_machine_readable(tmp_path: Path) -> None:
     fake.pages = [[bso("a")]]
 
     report = await sync(tmp_path, fake)
-    payload = json.loads(report.to_json())
+    payload = json.loads(render(report, machine=True))
 
     assert payload["format_version"] == 2
     assert set(payload) >= {"collections", "elapsed_seconds", "database", "protocol"}

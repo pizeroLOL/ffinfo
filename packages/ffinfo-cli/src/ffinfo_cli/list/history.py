@@ -58,7 +58,7 @@ class HistoryReport(BaseModel):
     """``list history`` 的输出 —— 双源合并后，一次访问一行。
 
     与 bookmarks / tabs 的报告**没有共同基类**：共享的是形状，用 ``report.ListReport``
-    这个 union 表达。序列化暂时是 ``report.to_json`` （06 会收进 ``render.py``）。
+    这个 union 表达。序列化在 ``ffinfo_cli/render.py``。
     """
 
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)

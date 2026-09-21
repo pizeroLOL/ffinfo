@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
+from ffinfo.bookmarks import BookmarkNode
 from ffinfo.errors import (
     AuthError,
     BackoffError,
@@ -22,8 +24,13 @@ from ffinfo.errors import (
     SyncProtocolError,
 )
 from ffinfo.oauth import Credentials
+from ffinfo.storage import FetchProgress
+from ffinfo.tabs import ClientTabs, TabEntry
 from ffinfo_cli.cli import app
 from ffinfo_cli.failures import error_payload
+from ffinfo_cli.list.bookmarks import BookmarksReport
+from ffinfo_cli.list.tabs import TabsReport
+from ffinfo_cli.sync import CollectedSync, SyncReport
 
 runner = CliRunner()
 
@@ -73,8 +80,25 @@ def test_unknown_error_falls_back_but_keeps_the_message() -> None:
         ["sync", "--page-size", "101"],
     ],
 )
-def test_usage_errors_are_exit_2_and_json(argv: list[str]) -> None:
+def test_usage_errors_are_exit_2_and_human_by_default(argv: list[str]) -> None:
     result = runner.invoke(app, argv)
+
+    assert result.exit_code == 2
+    assert result.stderr.startswith("错误：")
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["list", "history", "--limit", "-1"],
+        ["list", "history", "--since", "上周三"],
+        ["sync", "--page-size", "0"],
+        ["sync", "--page-size", "101"],
+    ],
+)
+def test_usage_errors_are_exit_2_and_json_with_j(argv: list[str]) -> None:
+    """错误形态跟随模式 —— ``-j`` 时才是 stderr JSON，退出码两种模式一致。"""
+    result = runner.invoke(app, ["-j", *argv])
 
     assert result.exit_code == 2
     assert json.loads(result.stderr)["error"]["code"] == "usage"
@@ -114,10 +138,22 @@ def test_list_subcommands_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA"):
         monkeypatch.setenv(name, str(tmp_path / name))
 
-    result = runner.invoke(app, ["list", "history"])
+    result = runner.invoke(app, ["-j", "list", "history"])
 
     assert result.exit_code == 0, result.stderr
     assert json.loads(result.stdout)["data_type"] == "history"
+
+
+def test_default_output_is_human(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """默认人读 —— 空历史也有汇总行，绝不是一份 JSON。"""
+    for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA"):
+        monkeypatch.setenv(name, str(tmp_path / name))
+
+    result = runner.invoke(app, ["list", "history"])
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout.startswith("共 0 次访问")
+    assert not result.stdout.lstrip().startswith("{")
 
 
 def test_missing_credentials_is_configuration_exit_3(
@@ -131,7 +167,7 @@ def test_missing_credentials_is_configuration_exit_3(
     for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA"):
         monkeypatch.setenv(name, str(tmp_path / name))
 
-    result = runner.invoke(app, ["list", "bookmarks"])
+    result = runner.invoke(app, ["-j", "list", "bookmarks"])
 
     assert result.exit_code == 3
     error = json.loads(result.stderr)["error"]
@@ -139,12 +175,8 @@ def test_missing_credentials_is_configuration_exit_3(
     assert "私钥" in error["message"] or "凭据" in error["message"]
 
 
-def test_convergence_warning_reaches_stderr(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """老库收敛不是悄悄干的：命令行那层把它接到 stderr（这不是失败，退出码照旧 0）。"""
-    for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA"):
-        monkeypatch.setenv(name, str(tmp_path))
+def _legacy_duplicate_database(tmp_path: Path) -> None:
+    """造一个含重复 sync_records 的老库 —— 打开时应该收敛并警告。"""
     database = tmp_path / "ffinfo-cli" / "ffinfo.sqlite"
     database.parent.mkdir(parents=True)
     connection = sqlite3.connect(database)
@@ -174,10 +206,27 @@ def test_convergence_warning_reaches_stderr(
     connection.commit()
     connection.close()
 
-    result = runner.invoke(app, ["profiles"])
+
+@pytest.mark.parametrize("machine", [False, True])
+def test_convergence_warning_follows_the_mode(
+    machine: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """老库收敛不是悄悄干的：命令行那层把它接到 stderr（不是失败，退出码照旧 0）。
+
+    形态跟随模式 —— 默认 ``警告：…``，``-j`` 时是一行 warning JSON。
+    """
+    for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA"):
+        monkeypatch.setenv(name, str(tmp_path))
+    _legacy_duplicate_database(tmp_path)
+
+    result = runner.invoke(app, ["-j", "profiles"] if machine else ["profiles"])
 
     assert result.exit_code == 0
-    assert "1 条重复记录" in result.stderr
+    if machine:
+        assert "1 条重复记录" in json.loads(result.stderr)["warning"]["message"]
+    else:
+        assert result.stderr.startswith("警告：")
+        assert "1 条重复记录" in result.stderr
 
 
 def test_login_without_oldsync_keys_is_auth_exit_4(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -193,7 +242,7 @@ def test_login_without_oldsync_keys_is_auth_exit_4(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr("ffinfo_cli.commands.login.login_sync", fake_login)
 
-    result = runner.invoke(app, ["login"])
+    result = runner.invoke(app, ["-j", "login"])
 
     assert result.exit_code == 4
     error = json.loads(result.stderr)["error"]
@@ -211,7 +260,7 @@ def test_login_without_oldsync_keys_is_auth_exit_4(monkeypatch: pytest.MonkeyPat
 )
 def test_import_input_validation_is_exit_2_and_json(argv: list[str]) -> None:
     """两种输入二选一 —— 给多、给少、选项配错都是用法错误（退出码 2）。"""
-    result = runner.invoke(app, argv)
+    result = runner.invoke(app, ["-j", *argv])
 
     assert result.exit_code == 2
     assert json.loads(result.stderr)["error"]["code"] == "usage"
@@ -224,7 +273,9 @@ def test_import_from_firefox_with_a_bad_profile_is_configuration_exit_3(
     for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA"):
         monkeypatch.setenv(name, str(tmp_path / name))
 
-    result = runner.invoke(app, ["import", "--from-firefox", "--profile", str(tmp_path / "nope")])
+    result = runner.invoke(
+        app, ["-j", "import", "--from-firefox", "--profile", str(tmp_path / "nope")]
+    )
 
     assert result.exit_code == 3
     assert json.loads(result.stderr)["error"]["code"] == "configuration"
@@ -245,3 +296,141 @@ def test_completion_script_is_available() -> None:
 
     assert result.exit_code == 0
     assert result.stdout.strip()
+
+
+def _fake_sync(*, on_progress: object = None, **_kwargs: object) -> SyncReport:
+    """替身 sync_blocking：报一页进度、返回一份最小报告 —— 不联网、不读凭据。"""
+    if callable(on_progress):
+        on_progress(FetchProgress(collection="history", pages=1, records=3))
+    return SyncReport(
+        collections=[
+            CollectedSync(
+                collection="history",
+                mode="full",
+                records=3,
+                inserted=3,
+                updated=0,
+                deleted=0,
+                pages=1,
+                tombstones=0,
+                server_count=3,
+                cursor_before=None,
+                cursor_after=1.0,
+            )
+        ],
+        elapsed_seconds=0.1,
+        database="/tmp/ffinfo.sqlite",
+    )
+
+
+@pytest.mark.parametrize(
+    ("argv", "has_progress"),
+    [
+        (["-j", "sync"], False),
+        (["-j", "sync", "--progress"], True),
+        (["sync"], True),
+        (["sync", "--no-progress"], False),
+    ],
+)
+def test_progress_follows_the_mode(
+    argv: list[str], has_progress: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``-j`` 默认关进度（agent 的 stderr 不能混进进度行）；显式 ``--progress`` 仍开。"""
+    monkeypatch.setattr("ffinfo_cli.commands.sync.sync_blocking", _fake_sync)
+
+    result = runner.invoke(app, argv)
+
+    assert result.exit_code == 0, result.stderr
+    assert ("拉取 history" in result.stderr) is has_progress
+
+
+def test_sync_default_output_is_human(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ffinfo_cli.commands.sync.sync_blocking", _fake_sync)
+
+    result = runner.invoke(app, ["sync", "--no-progress"])
+
+    assert result.exit_code == 0, result.stderr
+    assert not result.stdout.lstrip().startswith("{")
+    assert "collections: history" in result.stdout
+
+
+def test_sync_json_output_with_j(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ffinfo_cli.commands.sync.sync_blocking", _fake_sync)
+
+    result = runner.invoke(app, ["-j", "sync", "--no-progress"])
+
+    assert result.exit_code == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["format_version"] == 2
+    assert payload["collections"][0]["collection"] == "history"
+
+
+def _fake_bookmarks(**_kwargs: object) -> BookmarksReport:
+    return BookmarksReport(
+        data_type="bookmarks",
+        generated_at="2026-09-13T17:30:12+00:00",
+        filters={},
+        records=2,
+        skipped=0,
+        matched=1,
+        returned=1,
+        tree=[
+            BookmarkNode(
+                id="folder",
+                type="folder",
+                title="工具",
+                children=[
+                    BookmarkNode(
+                        id="bmk", type="bookmark", title="示例", url="https://example.com/"
+                    )
+                ],
+            )
+        ],
+    )
+
+
+def _fake_tabs(**_kwargs: object) -> TabsReport:
+    return TabsReport(
+        data_type="tabs",
+        generated_at="2026-09-13T17:30:12+00:00",
+        filters={},
+        records=1,
+        skipped=0,
+        matched=1,
+        returned=1,
+        clients=[
+            ClientTabs(
+                client_id="dev-1",
+                client_name="alpha",
+                tabs=(
+                    TabEntry(
+                        client_id="dev-1",
+                        client_name="alpha",
+                        title="一",
+                        url="https://a.test/",
+                        last_used_at=datetime(2023, 11, 14, 22, 13, 20, tzinfo=UTC),
+                        icon=None,
+                        window_id=None,
+                    ),
+                ),
+            )
+        ],
+    )
+
+
+def test_bookmarks_default_output_is_a_tree(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ffinfo_cli.commands.list.list_bookmarks_blocking", _fake_bookmarks)
+
+    result = runner.invoke(app, ["list", "bookmarks"])
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout.splitlines() == ["▸ 工具", "  • 示例  https://example.com/"]
+
+
+def test_tabs_default_output_groups_by_device(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ffinfo_cli.commands.list.list_tabs_blocking", _fake_tabs)
+
+    result = runner.invoke(app, ["list", "tabs"])
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout.splitlines() == ["alpha", "  • 一  https://a.test/"]

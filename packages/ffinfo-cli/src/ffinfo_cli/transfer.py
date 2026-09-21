@@ -16,7 +16,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -106,10 +105,6 @@ class ExportReport(BaseModel):
     """
     elapsed_seconds: float
 
-    def to_json(self) -> str:
-        """给 agent 消费的 JSON。"""
-        return json.dumps(self.model_dump(), ensure_ascii=False, indent=2)
-
 
 class ImportReport(BaseModel):
     """一次 import 的结果。"""
@@ -139,10 +134,6 @@ class ImportReport(BaseModel):
     warnings: list[str] = []
     """文件对不上账的地方（不完整、WAL 没带出来）—— **非空就要让人看见**。"""
     elapsed_seconds: float
-
-    def to_json(self) -> str:
-        """给 agent 消费的 JSON。"""
-        return json.dumps(self.model_dump(), ensure_ascii=False, indent=2)
 
 
 async def run_export(

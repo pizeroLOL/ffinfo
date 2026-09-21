@@ -29,6 +29,7 @@ from ffinfo_cli.portable import (
     read_portable,
     write_portable,
 )
+from ffinfo_cli.render import render
 from ffinfo_cli.store import (
     CollectionBatch,
     SyncCursor,
@@ -175,7 +176,7 @@ async def test_export_report_says_what_happened(tmp_path: Path) -> None:
     profile_with_firefox(home, [("https://a.example/", "A", micros(DAY), 1)])
 
     report = await export_from(home, tmp_path / "portable.sqlite")
-    payload = json.loads(report.to_json())
+    payload = json.loads(render(report, machine=True))
 
     assert payload["destination"].endswith("portable.sqlite")
     assert payload["machine"] == "test-laptop"
@@ -306,7 +307,7 @@ async def test_import_from_firefox_lands_in_the_table(tmp_path: Path) -> None:
     assert report.exported_at is None
     assert report.records_inserted == 0
     assert report.cursors_advanced == 0
-    payload = json.loads(report.to_json())
+    payload = json.loads(render(report, machine=True))
     assert payload["input"] == "firefox"
     assert payload["portable_path"] is None
     assert payload["exported_at"] is None

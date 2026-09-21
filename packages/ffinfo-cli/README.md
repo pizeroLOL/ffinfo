@@ -1,6 +1,6 @@
 # ffinfo-cli
 
-把 Firefox 浏览数据拉到本地 SQLite，输出纯 JSON。
+把 Firefox 浏览数据拉到本地 SQLite。默认输出给人看；加 `-j/--json` 输出纯 JSON 给 agent。
 
 **真正的用户是 agent** —— AstrBot skill（作者工作区的 `skills/ffinfo/`）就调它的 JSON 输出做分析。
 
@@ -9,7 +9,7 @@
 ```bash
 ffinfo-cli login                # 浏览器里授权一次（密码不经过本工具）
 ffinfo-cli sync                 # 从 Firefox Sync 拉取（显式触发；进度走 stderr）
-ffinfo-cli list history         # 查询浏览历史（一次访问一行），恒输出 JSON
+ffinfo-cli list history         # 查询浏览历史（一次访问一行）
 ffinfo-cli list bookmarks       # 查询书签（保留层级）
 ffinfo-cli list tabs            # 查询标签页（按设备分组）
 ffinfo-cli export <path>        # 在【有 Firefox 的机器】上导出 firefox places.sqlite
@@ -21,9 +21,17 @@ ffinfo-cli profiles             # 查看本地状态（profile、密钥、各 co
 `list` 是子命令组：`history` / `bookmarks` / `tabs` 三种类型各一个，取代了旧的
 `list --data-type X`。筛选项按类型各给一套：`history` 是 `--since` / `--domain` / `--search`，
 `bookmarks` 是 `--path`（命中后从该文件夹重新生根），`tabs` 是 `--device`；`--limit` 三类都有。
-**没有 `--json` 这个开关** —— 输出本来就是 JSON，成功时 stdout 上只有那份结果。
 
-失败时 stdout 是空的：stderr 上是机器可读的错误 JSON（`{"error": {"code", "message"}}`），
+**默认人读；`-j/--json`（写在子命令之前）输出纯 JSON** —— agent 消费 JSON，人看排版：
+
+```bash
+ffinfo-cli list history             # 三列表格 + 汇总
+ffinfo-cli -j list history          # 一条 JSON
+ffinfo-cli -j sync
+```
+
+失败时 stdout 是空的，形态跟随模式：默认 stderr 是一行 `错误：…`，`-j` 时是机器可读的
+错误 JSON（`{"error": {"code", "message"}}`）；警告同此（`-j` 时是 `{"warning": {"message"}}`）。
 退出码分档 —— 表在[根 README](../../README.md)。
 
 ## 数据源（双源）

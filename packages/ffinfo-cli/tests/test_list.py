@@ -32,7 +32,7 @@ from ffinfo_cli.list import (
     matches_search,
     parse_since,
 )
-from ffinfo_cli.list.report import to_json
+from ffinfo_cli.render import render
 from ffinfo_cli.store import (
     CollectionBatch,
     StoredVisit,
@@ -278,7 +278,7 @@ async def test_output_carries_format_version_and_filters(tmp_path: Path) -> None
     await build_db(tmp_path, [history_record("rec")])
 
     report = await run(tmp_path, domain="example.com")
-    payload = json.loads(to_json(report))
+    payload = json.loads(render(report, machine=True))
 
     assert "format_version" in payload
     assert payload["filters"]["domain"] == "example.com"
@@ -292,7 +292,7 @@ async def test_never_synced_says_so_instead_of_pretending(tmp_path: Path) -> Non
     await build_db(tmp_path, [history_record("rec")])
 
     report = await run(tmp_path)
-    payload = json.loads(to_json(report))
+    payload = json.loads(render(report, machine=True))
 
     assert report.synced_at is None
     assert report.age_seconds is None
@@ -737,7 +737,7 @@ async def test_json_shape_of_a_merged_row(tmp_path: Path) -> None:
     await add_firefox(tmp_path, [firefox_visit("https://both.test/", when=DAY)])
 
     report = await run(tmp_path)
-    payload = json.loads(to_json(report))
+    payload = json.loads(render(report, machine=True))
 
     assert payload["sources"] == ["sync", "firefox"]
     assert payload["firefox_records"] == 1
@@ -855,7 +855,7 @@ async def test_bookmark_json_is_serializable_with_iso_times(tmp_path: Path) -> N
     )
 
     report = await run_bookmarks(tmp_path)
-    payload = json.loads(to_json(report))
+    payload = json.loads(render(report, machine=True))
 
     assert payload["tree"][0]["children"][0]["added_at"] == "2026-09-13T12:00:00+00:00"
 
@@ -1112,7 +1112,7 @@ async def test_tabs_json_is_serializable_with_iso_times(tmp_path: Path) -> None:
     )
 
     report = await run_tabs(tmp_path)
-    payload = json.loads(to_json(report))
+    payload = json.loads(render(report, machine=True))
 
     assert payload["clients"][0]["tabs"][0]["last_used_at"] == "2023-11-14T22:13:20+00:00"
 
@@ -1200,14 +1200,14 @@ async def test_json_key_set_matches_v4(tmp_path: Path, data_type: str) -> None:
         await build_db(tmp_path, [], tabs=[tabs_record("dev")])
         report = await run_tabs(tmp_path)
 
-    payload = json.loads(to_json(report))
+    payload = json.loads(render(report, machine=True))
 
     assert set(payload) == V4_JSON_KEYS[data_type]
     assert payload["format_version"] == 5
 
 
 def test_reports_carry_no_to_json_method() -> None:
-    """序列化暂时是 ``list/report.py`` 的自由函数，不挂在报告模型上（06 收进 ``render.py``）。"""
+    """序列化只在 ``render.py``，不挂在报告模型上。"""
     report = HistoryReport(
         data_type="history",
         generated_at="2026-09-13T17:30:12+00:00",
@@ -1218,7 +1218,7 @@ def test_reports_carry_no_to_json_method() -> None:
         returned=0,
     )
 
-    assert json.loads(to_json(report))["format_version"] == 5
+    assert json.loads(render(report, machine=True))["format_version"] == 5
     assert not hasattr(report, "to_json")
 
 

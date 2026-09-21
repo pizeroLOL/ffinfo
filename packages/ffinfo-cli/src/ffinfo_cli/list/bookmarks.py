@@ -31,7 +31,7 @@ class BookmarksReport(BaseModel):
     """``list bookmarks`` 的输出 —— 保留父子层级的树。
 
     与 history / tabs 的报告**没有共同基类**：共享的是形状，用 ``report.ListReport``
-    这个 union 表达。序列化暂时是 ``report.to_json`` （06 会收进 ``render.py``）。
+    这个 union 表达。序列化在 ``ffinfo_cli/render.py``。
     """
 
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
