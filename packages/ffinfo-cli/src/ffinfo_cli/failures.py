@@ -15,10 +15,17 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+import sys
+from collections.abc import Callable, Sequence
 from typing import Any, Final, NoReturn
 
 import typer
+from typer.core import TyperGroup
+
+try:  # Typer 0.16+ 自带一份 click（``typer._click``）；老版本 Typer 直接复用 click 包
+    from typer._click.exceptions import NoArgsIsHelpError, UsageError
+except ImportError:  # pragma: no cover - 只对老版本 Typer 生效
+    from click.exceptions import NoArgsIsHelpError, UsageError
 
 from ffinfo.errors import (
     AuthError,
@@ -31,11 +38,13 @@ from ffinfo.errors import (
 )
 
 __all__ = [
+    "CliTyper",
     "emit_error",
     "error_payload",
     "fail",
     "fail_usage",
     "guard",
+    "machine_from_argv",
     "set_machine",
     "warn",
 ]
@@ -105,6 +114,67 @@ def fail_usage(message: str) -> NoReturn:
     """用法错误 —— 与其它失败共用同一层外壳；退出码 2 与 typer 自己的口径一致。"""
     emit_error({"error": {"code": "usage", "message": message}})
     raise typer.Exit(code=2)
+
+
+def machine_from_argv(argv: Sequence[str]) -> bool:
+    """从原始 argv 里 best-effort 认出 ``-j`` / ``--json``。
+
+    解析失败时 ``ctx.obj`` 不可信 —— root callback 可能没跑，也可能已经按“没看见 ``-j``”
+    的解析结果跑过。模式只能从 argv 判；认不出就当人读。
+    """
+    return any(arg in ("-j", "--json") for arg in argv)
+
+
+class _UsageAwareGroup(TyperGroup):
+    """把 Click/Typer **自己**解析阶段的 ``UsageError`` 接进同一套失败渲染。
+
+    Typer 只给了 ``TyperGroup`` 这个夹具：真实入口和 ``CliRunner`` 调的都是它生成的
+    Click group 的 ``main``，而不是 ``Typer`` 对象本身。这里用 ``standalone_mode=False``
+    调用父类 —— 否则 Click 会在父类里就把 ``UsageError`` 打成人读文本并 ``sys.exit``，
+    轮不到我们。``--help`` / ``--version`` / 补全抛的是 ``Exit``，照旧穿透。
+    """
+
+    def main(
+        self,
+        args: Sequence[str] | None = None,
+        prog_name: str | None = None,
+        complete_var: str | None = None,
+        standalone_mode: bool = True,
+        windows_expand_args: bool = True,
+        **extra: object,
+    ) -> object:
+        machine = machine_from_argv(args if args is not None else sys.argv[1:])
+        set_machine(machine)
+        try:
+            result = super().main(
+                args=args,
+                prog_name=prog_name,
+                complete_var=complete_var,
+                standalone_mode=False,
+                windows_expand_args=windows_expand_args,
+                **extra,
+            )
+        except UsageError as exc:
+            # 子命令解析失败时 root callback 已经跑过、并按“没看见 -j”刷过一遍；
+            # 以 argv 扫描为准重新覆盖，再渲染。
+            set_machine(machine)
+            # 无子命令的 ``no_args_is_help`` 已经自己把 help 打了；别再当成错误重复一遍
+            if not isinstance(exc, NoArgsIsHelpError):
+                emit_error({"error": {"code": "usage", "message": exc.format_message()}})
+            raise SystemExit(exc.exit_code) from exc
+        # 命令体里的 ``typer.Exit``（fail / fail_usage）在非 standalone 模式下变成返回值
+        if isinstance(result, int) and not isinstance(result, bool) and result != 0:
+            raise SystemExit(result)
+        return result
+
+
+class CliTyper(typer.Typer):
+    """``ffinfo-cli`` 的 Typer app —— 生成的使用错误都走 :class:`_UsageAwareGroup`。"""
+
+    def __init__(self, **kwargs: Any) -> None:  # noqa: ANN401 - 原样透传给 Typer
+        """建 app；``cls`` 默认换成会接住解析错误的 :class:`_UsageAwareGroup`。"""
+        kwargs.setdefault("cls", _UsageAwareGroup)
+        super().__init__(**kwargs)
 
 
 def guard[ReportT](call: Callable[[], ReportT], *, backoff_note: str = "") -> ReportT:

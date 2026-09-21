@@ -57,7 +57,9 @@ uv run ffinfo-cli import --from-firefox --profile <目录>   # 手动指定
 退出码分档 —— 调用方不用猜是"参数错了"还是"该重新登录了"。
 **`-j/--json` 时**：成功时 stdout 只有一份 JSON；失败时 stdout 为空、stderr 是机器可读的错误 JSON。
 **默认（人读）时**：成功输出是人读排版；失败是 stderr 上的一行 `错误：…`。
-解析阶段的错误（未知子命令 / 选项、缺参数）与命令体校验同一档（`usage` / 退出码 2）。
+解析阶段的错误（未知子命令 / 选项、缺参数、enum 不合法）与命令体校验同一档
+（`usage` / 退出码 2），`-j` 时同样是 stderr JSON。`--help` / `--version` / 补全命令不受影响
+（stdout 始终人读、退出 0）。
 
 | 退出码 | `code` | 含义 |
 | --- | --- | --- |

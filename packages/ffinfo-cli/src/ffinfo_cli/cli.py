@@ -14,9 +14,9 @@ import typer
 from ffinfo_cli import __version__
 from ffinfo_cli.commands import list as list_command
 from ffinfo_cli.commands import login, profiles, sync, transfer
-from ffinfo_cli.failures import set_machine
+from ffinfo_cli.failures import CliTyper, set_machine
 
-app = typer.Typer(
+app = CliTyper(
     name="ffinfo-cli",
     help="把 Firefox 浏览数据（云端 Sync + firefox places.sqlite）拉到本地 SQLite。",
     no_args_is_help=True,

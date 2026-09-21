@@ -5,12 +5,15 @@
 
 from __future__ import annotations
 
+import enum
 import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from ffinfo.bookmarks import BookmarkNode
@@ -27,7 +30,7 @@ from ffinfo.oauth import Credentials
 from ffinfo.storage import FetchProgress
 from ffinfo.tabs import ClientTabs, TabEntry
 from ffinfo_cli.cli import app
-from ffinfo_cli.failures import error_payload
+from ffinfo_cli.failures import CliTyper, error_payload, machine_from_argv
 from ffinfo_cli.list.bookmarks import BookmarksReport
 from ffinfo_cli.list.tabs import TabsReport
 from ffinfo_cli.sync import CollectedSync, SyncReport
@@ -105,6 +108,121 @@ def test_usage_errors_are_exit_2_and_json_with_j(argv: list[str]) -> None:
     assert json.loads(result.stderr)["error"]["code"] == "usage"
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["nope"],  # 未知子命令
+        ["list", "nope"],  # 子命令组下的未知子命令
+        ["sync", "--nope"],  # 未知选项
+        ["list", "tabs", "--nope"],  # 子命令下的未知选项
+        ["export"],  # 缺参数
+    ],
+)
+def test_parse_errors_are_exit_2_and_human_by_default(argv: list[str]) -> None:
+    """Click/Typer **自己**解析阶段的错误也走契约：stderr 一行 ``错误：``、退出 2。"""
+    result = runner.invoke(app, argv)
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert result.stderr.startswith("错误：")
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["nope"],
+        ["list", "nope"],
+        ["sync", "--nope"],
+        ["list", "tabs", "--nope"],
+        ["export"],
+    ],
+)
+def test_parse_errors_are_exit_2_and_json_with_j(argv: list[str]) -> None:
+    """``-j`` 写在子命令之前时，解析失败也走同一份错误 JSON。"""
+    result = runner.invoke(app, ["-j", *argv])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert json.loads(result.stderr)["error"]["code"] == "usage"
+
+
+def test_parse_error_mode_scans_argv_even_after_the_subcommand() -> None:
+    """``-j`` 写在子命令之后也认 —— 扫的是原始 argv，不靠只管子命令之前的 callback。"""
+    result = runner.invoke(app, ["sync", "-j", "--nope"])
+
+    assert result.exit_code == 2
+    assert json.loads(result.stderr)["error"]["code"] == "usage"
+
+
+def test_parse_error_mode_does_not_leak_between_invocations() -> None:
+    """一次 ``-j`` 不能把下一次解析失败也染成 JSON —— 每次进 ``main`` 都重新扫 argv。"""
+    first = runner.invoke(app, ["-j", "sync", "--nope"])
+    second = runner.invoke(app, ["sync", "--nope"])
+
+    assert json.loads(first.stderr)["error"]["code"] == "usage"
+    assert second.stderr.startswith("错误：")
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["-j", "--help"], ["-j", "-h"], ["-j", "--version"], ["-j", "-V"]],
+)
+def test_eager_exits_ignore_machine_mode(argv: list[str]) -> None:
+    """``--help`` / ``--version`` 抛的是 ``Exit(0)``，不走 UsageError —— stdout 永远人读。"""
+    result = runner.invoke(app, argv)
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout
+    assert not result.stdout.lstrip().startswith("{")
+
+
+def test_completion_ignores_machine_mode() -> None:
+    """补全命令同样走 ``Exit`` —— 带 ``-j`` 也不变成 JSON。"""
+    result = runner.invoke(app, ["-j", "--show-completion", "bash"])
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout.strip()
+    assert not result.stdout.lstrip().startswith("{")
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["-j", "sync"], True),
+        (["sync", "--json"], True),
+        (["sync", "--nope"], False),
+        ([], False),
+    ],
+)
+def test_machine_from_argv_scans_the_json_flag(argv: list[str], expected: bool) -> None:
+    """解析失败路径的模式判定：只看 argv 里有没有 ``-j`` / ``--json``。"""
+    assert machine_from_argv(argv) is expected
+
+
+class _Color(enum.Enum):
+    red = "red"
+    blue = "blue"
+
+
+def test_enum_parse_error_follows_the_contract() -> None:
+    """enum 不合法也是解析阶段错误 —— 用最小 app 钉住这条通用路径。"""
+    small = CliTyper(name="small")
+
+    @small.callback()
+    def _root() -> None:
+        """root callback —— 让 ``small`` 生成 Group（才会用上自定义的 group class）。"""
+
+    @small.command()
+    def pick(color: Annotated[_Color, typer.Option("--color")]) -> None:
+        typer.echo(color.value)
+
+    result = runner.invoke(small, ["-j", "pick", "--color", "green"])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert json.loads(result.stderr)["error"]["code"] == "usage"
+
+
 def test_data_type_option_is_rejected() -> None:
     """``--data-type`` 硬删 —— 老用法现在就是用法错误（退出码 2）。"""
     result = runner.invoke(app, ["list", "--data-type", "history"])
@@ -116,11 +234,12 @@ def test_data_type_option_is_rejected() -> None:
 def test_sync_collection_option_is_rejected(option: str) -> None:
     """``sync`` 永远拉白名单三件套 —— ``--collection / -c`` 硬删（用法错误、退出 2）。
 
-    未知选项现在是**解析阶段**错误，走 Click 默认输出；08 会把它接到错误 JSON 契约上。
+    未知选项是**解析阶段**错误，同样走错误 JSON 契约（见本文件上面的解析错误用例）。
     """
-    result = runner.invoke(app, ["sync", option, "history"])
+    result = runner.invoke(app, ["-j", "sync", option, "history"])
 
     assert result.exit_code == 2
+    assert json.loads(result.stderr)["error"]["code"] == "usage"
 
 
 def test_per_type_filters_are_not_shared_across_subcommands() -> None:
