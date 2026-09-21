@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -19,7 +20,8 @@ from ffinfo.errors import ConfigurationError
 from ffinfo.keys import OLD_SYNC_SCOPE, ScopedKey
 from ffinfo.oauth import Credentials
 from ffinfo.storage import EncryptedBso
-from ffinfo_cli.list import ListReport, matches_domain, matches_search, parse_since, run_list
+from ffinfo_cli import list as list_module
+from ffinfo_cli.list import ListReport, matches_domain, matches_search, parse_since
 from ffinfo_cli.store import (
     CollectionBatch,
     StoredVisit,
@@ -186,15 +188,30 @@ async def build_db(
     await store.store_batches(batches)
 
 
-async def run(tmp_path: Path, **kwargs: object) -> ListReport:
+async def _run(
+    entry: Callable[..., Awaitable[ListReport]], tmp_path: Path, **kwargs: object
+) -> ListReport:
     identity_path, credentials_path = write_credentials(tmp_path)
-    return await run_list(
+    return await entry(
         identity_path=identity_path,
         credentials_path=credentials_path,
         database_path=tmp_path / "db.sqlite",
         clock=lambda: NOW,
         **kwargs,  # type: ignore[arg-type]
     )
+
+
+async def run(tmp_path: Path, **kwargs: object) -> ListReport:
+    """历史查询 —— ``run`` 是历史的那个入口，另两个各有自己的夹具。"""
+    return await _run(list_module.run_history, tmp_path, **kwargs)
+
+
+async def run_bookmarks(tmp_path: Path, **kwargs: object) -> ListReport:
+    return await _run(list_module.run_bookmarks, tmp_path, **kwargs)
+
+
+async def run_tabs(tmp_path: Path, **kwargs: object) -> ListReport:
+    return await _run(list_module.run_tabs, tmp_path, **kwargs)
 
 
 async def test_lists_visits_newest_first(tmp_path: Path) -> None:
@@ -538,7 +555,7 @@ async def test_firefox_source_alone_needs_no_credentials(tmp_path: Path) -> None
     await build_db(tmp_path, [])
     await add_firefox(tmp_path, [firefox_visit("https://firefox.test/")])
 
-    report = await run_list(
+    report = await list_module.run_history(
         identity_path=tmp_path / "no-such-age-key.txt",
         credentials_path=tmp_path / "no-such-credentials.age",
         database_path=tmp_path / "db.sqlite",
@@ -555,7 +572,7 @@ async def test_cloud_records_without_credentials_still_fail(tmp_path: Path) -> N
     await build_db(tmp_path, [history_record("rec")])
 
     with pytest.raises(ConfigurationError):
-        await run_list(
+        await list_module.run_history(
             identity_path=tmp_path / "no-such-age-key.txt",
             credentials_path=tmp_path / "no-such-credentials.age",
             database_path=tmp_path / "db.sqlite",
@@ -568,7 +585,7 @@ async def test_empty_database_without_credentials_is_an_empty_report(tmp_path: P
 
     没有云端记录就没有密文要解 —— 凭据不该挡路；"从没登录"靠 ``synced_at: null`` 表达。
     """
-    report = await run_list(
+    report = await list_module.run_history(
         identity_path=tmp_path / "no-such-age-key.txt",
         credentials_path=tmp_path / "no-such-credentials.age",
         database_path=tmp_path / "db.sqlite",
@@ -732,7 +749,7 @@ async def test_bookmarks_keep_the_tree(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(tmp_path, data_type="bookmarks")
+    report = await run_bookmarks(tmp_path)
 
     assert [node.id for node in report.tree] == ["folder"]
     assert report.tree[0].children[0].id == "bmk"
@@ -752,7 +769,7 @@ async def test_bookmark_limit_counts_bookmarks_not_folders(tmp_path: Path) -> No
         ],
     )
 
-    report = await run(tmp_path, data_type="bookmarks", limit=1)
+    report = await run_bookmarks(tmp_path, limit=1)
 
     assert report.returned == 1
     assert [node.id for node in report.tree] == ["folder"]
@@ -774,7 +791,7 @@ async def test_bookmark_filters_prune_empty_folders(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(tmp_path, data_type="bookmarks", domain="rust-lang.org")
+    report = await run_bookmarks(tmp_path, domain="rust-lang.org")
 
     assert report.returned == 1
     assert report.matched == 1
@@ -794,7 +811,7 @@ async def test_bookmark_limit_uses_the_budget_on_bookmarks(tmp_path: Path) -> No
         ],
     )
 
-    report = await run(tmp_path, data_type="bookmarks", limit=2)
+    report = await run_bookmarks(tmp_path, limit=2)
 
     assert report.returned == 2
     assert report.matched == 2
@@ -812,7 +829,7 @@ async def test_bookmark_cycles_reach_the_report_as_skipped(tmp_path: Path) -> No
         ],
     )
 
-    report = await run(tmp_path, data_type="bookmarks")
+    report = await run_bookmarks(tmp_path)
 
     assert report.tree == []
     assert report.skipped == 2
@@ -829,7 +846,7 @@ async def test_deep_bookmark_trees_do_not_blow_the_stack(tmp_path: Path) -> None
     records.append(bookmark_record("leaf", parent_id=f"n{depth - 1}", title="底"))
     await build_db(tmp_path, [], bookmarks=records)
 
-    report = await run(tmp_path, data_type="bookmarks")
+    report = await run_bookmarks(tmp_path)
 
     assert report.counts == {"folder": depth, "bookmark": 1}
     assert report.returned == 1
@@ -846,7 +863,7 @@ async def test_bookmark_json_is_serializable_with_iso_times(tmp_path: Path) -> N
         ],
     )
 
-    report = await run(tmp_path, data_type="bookmarks")
+    report = await run_bookmarks(tmp_path)
     payload = json.loads(report.to_json())
 
     assert payload["tree"][0]["children"][0]["added_at"] == "2026-09-13T12:00:00+00:00"
@@ -862,7 +879,7 @@ async def test_tabs_are_grouped_by_client(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(tmp_path, data_type="tabs")
+    report = await run_tabs(tmp_path)
 
     assert [client.client_name for client in report.clients] == ["alpha", "beta"]
     assert report.returned == 2
@@ -883,7 +900,7 @@ async def test_tabs_limit_counts_tabs_not_clients(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(tmp_path, data_type="tabs", limit=2)
+    report = await run_tabs(tmp_path, limit=2)
 
     assert report.matched == 3
     assert report.returned == 2
@@ -916,8 +933,8 @@ async def test_the_same_filter_semantics_apply_to_all_three_types(tmp_path: Path
     )
 
     history = await run(tmp_path, domain="example.com")
-    bookmarks = await run(tmp_path, data_type="bookmarks", domain="example.com")
-    tabs = await run(tmp_path, data_type="tabs", domain="example.com")
+    bookmarks = await run_bookmarks(tmp_path, domain="example.com")
+    tabs = await run_tabs(tmp_path, domain="example.com")
 
     assert [item.record_id for item in history.items] == ["hit"]
     assert [node.id for node in bookmarks.tree] == ["b-hit"]
@@ -939,7 +956,7 @@ async def test_bookmark_since_filter_compares_real_times(tmp_path: Path) -> None
         ],
     )
 
-    report = await run(tmp_path, data_type="bookmarks", since=DAY)
+    report = await run_bookmarks(tmp_path, since=DAY)
 
     assert [node.id for node in report.tree] == ["new"]
     assert report.returned == 1
@@ -962,7 +979,7 @@ async def test_tabs_since_filter_compares_real_times(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(tmp_path, data_type="tabs", since=DAY)
+    report = await run_tabs(tmp_path, since=DAY)
 
     assert [tab.title for tab in report.clients[0].tabs] == ["新"]
     assert report.returned == 1
@@ -979,7 +996,7 @@ async def test_tabs_json_is_serializable_with_iso_times(tmp_path: Path) -> None:
         ],
     )
 
-    report = await run(tmp_path, data_type="tabs")
+    report = await run_tabs(tmp_path)
     payload = json.loads(report.to_json())
 
     assert payload["clients"][0]["tabs"][0]["last_used_at"] == "2023-11-14T22:13:20+00:00"

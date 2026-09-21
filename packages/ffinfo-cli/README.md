@@ -9,16 +9,18 @@
 ```bash
 ffinfo-cli login                # 浏览器里授权一次（密码不经过本工具）
 ffinfo-cli sync                 # 从 Firefox Sync 拉取（显式触发；进度走 stderr）
-ffinfo-cli list                 # 查询，恒输出 JSON
+ffinfo-cli list history         # 查询浏览历史（一次访问一行），恒输出 JSON
+ffinfo-cli list bookmarks       # 查询书签（保留层级）
+ffinfo-cli list tabs            # 查询标签页（按设备分组）
 ffinfo-cli export <path>        # 在【有 Firefox 的机器】上导出 firefox places.sqlite
 ffinfo-cli import <path>        # 在【目标机器】上导入便携文件
 ffinfo-cli import --from-firefox [--profile <目录>]  # 就在有 Firefox 的机器上，直接读本机
 ffinfo-cli profiles             # 查看本地状态（profile、密钥、各 collection 的同步进度）
 ```
 
-`list` 的常用开关：`--data-type history|bookmarks|tabs`（默认 `history`）、
-`--since` / `--domain` / `--search` / `--limit`。**没有 `--json` 这个开关** ——
-输出本来就是 JSON，成功时 stdout 上只有那份结果。
+`list` 是子命令组：`history` / `bookmarks` / `tabs` 三种类型各一个，取代了旧的
+`list --data-type X`。目前三类共用 `--since` / `--domain` / `--search` / `--limit`。
+**没有 `--json` 这个开关** —— 输出本来就是 JSON，成功时 stdout 上只有那份结果。
 
 失败时 stdout 是空的：stderr 上是机器可读的错误 JSON（`{"error": {"code", "message"}}`），
 退出码分档 —— 表在[根 README](../../README.md)。

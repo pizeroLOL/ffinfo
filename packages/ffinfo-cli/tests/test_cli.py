@@ -67,9 +67,8 @@ def test_unknown_error_falls_back_but_keeps_the_message() -> None:
 @pytest.mark.parametrize(
     "argv",
     [
-        ["list", "--limit", "-1"],
-        ["list", "--data-type", "nope"],
-        ["list", "--since", "上周三"],
+        ["list", "history", "--limit", "-1"],
+        ["list", "history", "--since", "上周三"],
         ["sync", "--page-size", "0"],
         ["sync", "--page-size", "101"],
         ["sync", "--collection", "forms"],
@@ -80,6 +79,24 @@ def test_usage_errors_are_exit_2_and_json(argv: list[str]) -> None:
 
     assert result.exit_code == 2
     assert json.loads(result.stderr)["error"]["code"] == "usage"
+
+
+def test_data_type_option_is_rejected() -> None:
+    """``--data-type`` 硬删 —— 老用法现在就是用法错误（退出码 2）。"""
+    result = runner.invoke(app, ["list", "--data-type", "history"])
+
+    assert result.exit_code == 2
+
+
+def test_list_subcommands_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """三种数据类型各是一个子命令 —— 空库也照样出报告、退出 0。"""
+    for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA"):
+        monkeypatch.setenv(name, str(tmp_path / name))
+
+    result = runner.invoke(app, ["list", "history"])
+
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(result.stdout)["data_type"] == "history"
 
 
 def test_missing_credentials_is_configuration_exit_3(
@@ -93,7 +110,7 @@ def test_missing_credentials_is_configuration_exit_3(
     for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA"):
         monkeypatch.setenv(name, str(tmp_path / name))
 
-    result = runner.invoke(app, ["list", "--data-type", "bookmarks"])
+    result = runner.invoke(app, ["list", "bookmarks"])
 
     assert result.exit_code == 3
     error = json.loads(result.stderr)["error"]
