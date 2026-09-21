@@ -294,8 +294,10 @@ struct HistoryRecord {
 ### 3.8 firefox 源：places.sqlite 与 export/import（08 号，2026-09-14）
 
 **profile 定位不猜目录名**（形如 `<8位随机>.default-release`），走 Firefox 自己的
-`profiles.ini`，认它标的那个 `Default=1`；新版 Firefox 把"默认是哪个"记在
-`[InstallXXXX]` 段，也认。三平台根目录：
+`profiles.ini`。默认是哪个：**`[InstallXXXX] Default` 优先**，Profile 段的 `Default=1`
+只在没有 Install 段时才作数。老 `default` profile 升级后往往不清掉 `Default=1` —— 若与
+Install 段平权，两者会并列成默认，再按名字排序就把旧 profile 挑出来（`default` <
+`default-release`），`import --from-firefox` 静默导入 0 条。三平台根目录：
 
 | 平台 | 根目录 |
 | --- | --- |
@@ -325,7 +327,9 @@ Firefox 跑着的时候库是 WAL 模式，**最近的访问还在 `places.sqlit
 **差 1 微秒，同一次访问就会出两行。**
 
 两个源都有 → 一行，标 `both`；只有一边 → 标 `sync` 或 `firefox`；
-firefox 源是空的（目标机器没导入过）就自然降级成单源。
+firefox 源是空的（目标机器没导入过）就自然降级成单源。**单源降级不需要登录**：
+库里没有任何云端记录时，`list` 一步都不碰 age 私钥（凭据 / scoped key 只为解密云端密文而存在）；
+只有 `bookmarks` / `tabs` 这些云端独有类型才在缺凭据时报错。
 
 #### 便携文件（决策 17 的落地）
 

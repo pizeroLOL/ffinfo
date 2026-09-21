@@ -205,6 +205,63 @@ Path=chosen.default
     assert found[0].is_default is True
 
 
+def test_install_section_wins_over_stale_profile_default(tmp_path: Path) -> None:
+    """Install 段的 Default 才是"当前默认"；Profile 段残留的 Default=1 不该压过它。"""
+    root = tmp_path / LINUX_ROOT
+    make_profile(root, "abc123.default")
+    make_profile(root, "def456.default-release")
+    write_ini(
+        root,
+        """
+[Install4F96D1932A9F858E]
+Default=def456.default-release
+
+[Profile0]
+Name=default
+IsRelative=1
+Path=abc123.default
+Default=1
+
+[Profile1]
+Name=default-release
+IsRelative=1
+Path=def456.default-release
+""",
+    )
+
+    chosen = find_profile(host=host(tmp_path))
+
+    assert chosen.name == "default-release"
+    assert chosen.path == root / "def456.default-release"
+
+    # 残留的 Default=1 不再算默认 —— 默认簇里只有 Install 指定的那个
+    found = discover_profiles(host=host(tmp_path))
+    assert [profile.is_default for profile in found] == [True, False]
+
+
+def test_install_section_without_default_falls_back_to_profile_flag(tmp_path: Path) -> None:
+    """Install 段存在但没写 Default 时，退回看 Profile 段的 Default=1（老版本行为）。"""
+    root = tmp_path / LINUX_ROOT
+    make_profile(root, "abc123.default")
+    write_ini(
+        root,
+        """
+[Install4F96D1932A9F858E]
+
+[Profile0]
+Name=default
+IsRelative=1
+Path=abc123.default
+Default=1
+""",
+    )
+
+    chosen = find_profile(host=host(tmp_path))
+
+    assert chosen.name == "default"
+    assert chosen.is_default is True
+
+
 def test_missing_ini_falls_back_to_scanning(tmp_path: Path) -> None:
     """``profiles.ini`` 没了（或没见过）也得能找到 —— 直接扫 places.sqlite。"""
     root = tmp_path / LINUX_ROOT

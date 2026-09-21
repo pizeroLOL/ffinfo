@@ -84,11 +84,15 @@ def test_usage_errors_are_exit_2_and_json(argv: list[str]) -> None:
 def test_missing_credentials_is_configuration_exit_3(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """没登录 → 退出码 3（configuration），而不是含混的 1。"""
+    """没登录 → 退出码 3（configuration），而不是含混的 1。
+
+    ``list`` 默认的 history 现在能在没有凭据时降级（只有明文 firefox 数据也看得到），
+    所以用**云端独有**的 bookmarks 来守这条契约。
+    """
     for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA"):
         monkeypatch.setenv(name, str(tmp_path / name))
 
-    result = runner.invoke(app, ["list"])
+    result = runner.invoke(app, ["list", "--data-type", "bookmarks"])
 
     assert result.exit_code == 3
     error = json.loads(result.stderr)["error"]

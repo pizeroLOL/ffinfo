@@ -530,6 +530,39 @@ async def test_firefox_source_alone_is_usable(tmp_path: Path) -> None:
     assert report.items[0].record_id is None
 
 
+async def test_firefox_source_alone_needs_no_credentials(tmp_path: Path) -> None:
+    """只导入过 firefox 数据、从没 login 的机器 —— 不该被 age 私钥挡住。
+
+    firefox 源本来就是明文，云端那条解密链一次都不该走。
+    """
+    await build_db(tmp_path, [])
+    await add_firefox(tmp_path, [firefox_visit("https://firefox.test/")])
+
+    report = await run_list(
+        identity_path=tmp_path / "no-such-age-key.txt",
+        credentials_path=tmp_path / "no-such-credentials.age",
+        database_path=tmp_path / "db.sqlite",
+        clock=lambda: NOW,
+    )
+
+    assert [item.url for item in report.items] == ["https://firefox.test/"]
+    assert report.items[0].source == "firefox"
+    assert report.sources == ["firefox"]
+
+
+async def test_cloud_records_without_credentials_still_fail(tmp_path: Path) -> None:
+    """库里有云端记录、却没凭据文件 —— 必须报配置错误，不能静默当空库。"""
+    await build_db(tmp_path, [history_record("rec")])
+
+    with pytest.raises(ConfigurationError):
+        await run_list(
+            identity_path=tmp_path / "no-such-age-key.txt",
+            credentials_path=tmp_path / "no-such-credentials.age",
+            database_path=tmp_path / "db.sqlite",
+            clock=lambda: NOW,
+        )
+
+
 async def test_sync_source_alone_still_works(tmp_path: Path) -> None:
     """**降级到单源**：一台没导入过任何 firefox 数据的机器，查询照常。"""
     await build_db(tmp_path, [history_record("rec", url="https://cloud.test/")])

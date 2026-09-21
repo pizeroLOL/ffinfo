@@ -335,11 +335,14 @@ def _profiles_from_ini(root: Path) -> list[Profile]:
     except configparser.Error, OSError, UnicodeDecodeError:
         return []
 
-    # 新版 Firefox 把"默认是哪个"记在 [InstallXXXX] 段里，而不是 Profile 段
+    # 新版 Firefox 把"默认是哪个"记在 [InstallXXXX] 段里，而不是 Profile 段。
+    # 它一旦存在就是"当前默认" —— Profile 段残留的 Default=1（老的 default profile
+    # 升级后没清掉）不该与它并列，否则并列时只能按名字排序、把旧 profile 挑出来。
     install_defaults = {
-        _text(parser, section, "Default")
+        value
         for section in parser.sections()
         if section.startswith("Install")
+        if (value := _text(parser, section, "Default"))
     }
 
     profiles: list[Profile] = []
@@ -353,11 +356,14 @@ def _profiles_from_ini(root: Path) -> list[Profile]:
         path = (root / raw_path) if relative else Path(raw_path)
         if not (path / PLACES_FILENAME).is_file():
             continue
+        is_default = (
+            raw_path in install_defaults if install_defaults else _flag(parser, section, "Default")
+        )
         profiles.append(
             Profile(
                 name=_text(parser, section, "Name") or section,
                 path=path,
-                is_default=_flag(parser, section, "Default") or raw_path in install_defaults,
+                is_default=is_default,
             )
         )
     return profiles

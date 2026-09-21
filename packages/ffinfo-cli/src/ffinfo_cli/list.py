@@ -42,7 +42,7 @@ from pydantic import BaseModel, ConfigDict
 from ffinfo.bookmarks import BookmarkNode, parse_bookmarks
 from ffinfo.crypto import EncryptedPayload, KeyBundle
 from ffinfo.errors import ConfigurationError, DecryptionError
-from ffinfo.history import HistoryEntry, decrypt_history, visit_type_name
+from ffinfo.history import DecryptionReport, HistoryEntry, decrypt_history, visit_type_name
 from ffinfo.keys import CollectionKeys
 from ffinfo.tabs import ClientTabs, TabEntry, parse_tabs
 from ffinfo.timestamps import to_microseconds
@@ -202,9 +202,7 @@ async def run_list(
         msg = f"不认识的 --data-type「{data_type}」—— 只能是：{allowed}"
         raise ConfigurationError(msg)
 
-    credentials = load_credentials(identity_path=identity_path, credentials_path=credentials_path)
     store = await open_database(database_path, warn=warn)
-    key = await _collection_key(store, credentials.sync_key_bundle(), data_type)
     records = await store.load_records(data_type)
     # firefox 源只有历史这一种 —— 书签与标签页是云端独有
     firefox = await store.load_firefox_visits() if data_type == "history" else ()
@@ -232,6 +230,18 @@ async def run_list(
     }
 
     if data_type == "history":
+        # 双源：库里一条云端记录都没有时，明文的 firefox 数据就够 —— 别拿凭据挡路。
+        # 从没 login 过的机器也能看自己导入的东西（凭据只为解密云端记录而存在）。
+        key = (
+            await _cloud_key(
+                store=store,
+                identity_path=identity_path,
+                credentials_path=credentials_path,
+                data_type=data_type,
+            )
+            if records
+            else None
+        )
         return _history_report(
             records,
             key,
@@ -242,6 +252,13 @@ async def run_list(
             search=search,
             limit=limit,
         )
+
+    key = await _cloud_key(
+        store=store,
+        identity_path=identity_path,
+        credentials_path=credentials_path,
+        data_type=data_type,
+    )
     if data_type == "bookmarks":
         return _bookmark_report(
             records, key, common, since=since, domain=domain, search=search, limit=limit
@@ -253,7 +270,7 @@ async def run_list(
 
 def _history_report(
     records: Sequence[tuple[str, str | None]],
-    key: KeyBundle,
+    key: KeyBundle | None,
     firefox: Sequence[StoredVisit],
     common: dict[str, Any],
     *,
@@ -263,7 +280,13 @@ def _history_report(
     limit: int | None,
 ) -> ListReport:
     """历史：**两个源合并**，拍平成一次访问一行，最新的在前。"""
-    decrypted = decrypt_history(records, key)
+    # ``key is None`` 只在“库里没有任何云端记录”时发生（见 run_list）—— 此时没有密文要解，
+    # 空结果就是全部真相；纯 firefox 源的人不需要 age 私钥。
+    decrypted = (
+        decrypt_history(records, key)
+        if key is not None
+        else DecryptionReport(entries=(), skipped=(), tombstones=0, records=0)
+    )
     _guard_all_failed(
         decrypted.records, len(decrypted.entries), len(decrypted.skipped), fallback=len(firefox)
     )
@@ -556,6 +579,18 @@ def _counts(nodes: Sequence[BookmarkNode]) -> dict[str, int]:
     for node in _flatten(nodes):
         tally[node.type] = tally.get(node.type, 0) + 1
     return tally
+
+
+async def _cloud_key(
+    *, store: Store, identity_path: Path, credentials_path: Path, data_type: str
+) -> KeyBundle:
+    """加载凭据 → 派生这个 collection 的密钥。**只在确实要解密云端记录时调用。**
+
+    解密链（age 私钥 → 凭据 → scoped key → ``crypto/keys``）只为云端密文而存在。
+    纯 firefox 源的查询一步都不走这里 —— 从没 login 过的目标机器不该被挡在外面。
+    """
+    credentials = load_credentials(identity_path=identity_path, credentials_path=credentials_path)
+    return await _collection_key(store, credentials.sync_key_bundle(), data_type)
 
 
 async def _collection_key(store: Store, root_key: KeyBundle, collection: str) -> KeyBundle:
