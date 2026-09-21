@@ -37,12 +37,14 @@ from ffinfo_cli.store import (
 )
 from ffinfo_cli.transfer import (
     ExportReport,
+    FirefoxImport,
+    PortableImport,
     export_blocking,
     import_blocking,
     run_export,
     run_import,
 )
-from support import US, build_places
+from support import US, add_visits, build_places
 from support import us_of as micros
 
 DAY = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
@@ -205,9 +207,12 @@ async def test_import_lands_in_the_firefox_table(tmp_path: Path) -> None:
     portable_file(tmp_path / "portable.sqlite", visits=[("https://a.example/", micros(DAY))])
 
     report = await run_import(
-        database_path=tmp_path / "db.sqlite", source=tmp_path / "portable.sqlite"
+        database_path=tmp_path / "db.sqlite",
+        input=PortableImport(path=tmp_path / "portable.sqlite"),
     )
 
+    assert report.input == "portable"
+    assert report.format_version == 2
     assert report.visits_inserted == 1
     assert report.machine == "src"
     assert report.warnings == []
@@ -216,11 +221,10 @@ async def test_import_lands_in_the_firefox_table(tmp_path: Path) -> None:
 async def test_import_twice_does_not_duplicate(tmp_path: Path) -> None:
     """**增量导入**：同一份导出再导一次，只处理新增的部分。"""
     portable_file(tmp_path / "portable.sqlite", visits=[("https://a.example/", micros(DAY))])
+    portable = PortableImport(path=tmp_path / "portable.sqlite")
 
-    await run_import(database_path=tmp_path / "db.sqlite", source=tmp_path / "portable.sqlite")
-    second = await run_import(
-        database_path=tmp_path / "db.sqlite", source=tmp_path / "portable.sqlite"
-    )
+    await run_import(database_path=tmp_path / "db.sqlite", input=portable)
+    second = await run_import(database_path=tmp_path / "db.sqlite", input=portable)
 
     assert second.visits_inserted == 0
     assert second.visits_skipped == 1
@@ -235,7 +239,9 @@ async def test_import_surfaces_warnings_instead_of_swallowing_them(tmp_path: Pat
     connection.commit()
     connection.close()
 
-    report = await run_import(database_path=tmp_path / "db.sqlite", source=source)
+    report = await run_import(
+        database_path=tmp_path / "db.sqlite", input=PortableImport(path=source)
+    )
 
     assert len(report.warnings) == 1
     assert "不完整" in report.warnings[0]
@@ -262,7 +268,7 @@ async def test_import_does_not_downgrade_newer_cloud_data(tmp_path: Path) -> Non
         SyncCursor(collection="history", last_modified=500.0, synced_at=501.0, records=1)
     )
 
-    await run_import(database_path=database, source=source)
+    await run_import(database_path=database, input=PortableImport(path=source))
 
     rows = await SyncRecord.select().where(SyncRecord.record_id == "rec")
     assert float(rows[0]["modified"]) == 99.0
@@ -284,6 +290,121 @@ def portable_record(record_id: str, *, modified: float) -> PortableRecord:
     )
 
 
+async def test_import_from_firefox_lands_in_the_table(tmp_path: Path) -> None:
+    """`import --from-firefox` 直连本机 profile —— 不用先 export 一次。"""
+    home = tmp_path / "home"
+    profile_with_firefox(home, [("https://a.example/", "A", micros(DAY), 1)])
+
+    report = await run_import(
+        database_path=tmp_path / "db.sqlite",
+        input=FirefoxImport(home=home, platform="linux", env={}, machine="test-laptop"),
+    )
+
+    assert report.input == "firefox"
+    assert report.visits_inserted == 1
+    assert report.machine == "test-laptop"
+    assert report.profile == "default-release"
+    assert report.source is None
+    assert report.exported_at is None
+    assert report.records_inserted == 0
+    assert report.cursors_advanced == 0
+    payload = json.loads(report.to_json())
+    assert payload["input"] == "firefox"
+    assert payload["source"] is None
+    assert payload["exported_at"] is None
+    store = await open_database(tmp_path / "db.sqlite")
+    stored = await store.load_firefox_visits()
+    assert [item.url for item in stored] == ["https://a.example/"]
+    assert stored[0].machine == "test-laptop"
+
+
+async def test_import_from_firefox_is_idempotent(tmp_path: Path) -> None:
+    """同机再跑一次 —— 靠 ``(machine, url, 访问时刻)`` 去重，不翻倍。"""
+    home = tmp_path / "home"
+    profile_with_firefox(home, [("https://a.example/", "A", micros(DAY), 1)])
+    database = tmp_path / "db.sqlite"
+    source = FirefoxImport(home=home, platform="linux", env={}, machine="test-laptop")
+
+    first = await run_import(database_path=database, input=source)
+    second = await run_import(database_path=database, input=source)
+
+    assert first.visits_inserted == 1
+    assert second.visits_inserted == 0
+    assert second.visits_skipped == 1
+    store = await open_database(database)
+    assert len(await store.load_firefox_visits()) == 1
+
+
+async def test_import_from_firefox_takes_an_explicit_profile(tmp_path: Path) -> None:
+    """``--profile <目录>`` 与 export 走同一套发现逻辑。"""
+    profile = tmp_path / "elsewhere" / "my.profile"
+    build_places(profile / "places.sqlite", [("https://a.example/", "A", micros(DAY), 1)]).close()
+
+    report = await run_import(
+        database_path=tmp_path / "db.sqlite",
+        input=FirefoxImport(
+            home=tmp_path / "home",
+            platform="linux",
+            env={},
+            machine="test-laptop",
+            profile_path=profile,
+        ),
+    )
+
+    assert report.profile == "my.profile"
+    assert report.visits_inserted == 1
+
+
+async def test_import_from_firefox_keeps_visits_that_live_in_the_wal(tmp_path: Path) -> None:
+    """直连导入走 02 那条 WAL 安全的公共路径 —— 停在 ``-wal`` 里的最近访问也要进来。"""
+    home = tmp_path / "home"
+    root = home / ".mozilla" / "firefox"
+    connection = build_places(
+        root / "abc123.default-release" / "places.sqlite",
+        [("https://old.example/", "Old", micros(DAY), 1)],
+        wal=True,
+    )
+    add_visits(connection, [("https://new.example/", "New", micros(DAY) + 60 * US, 1)])
+    connection.commit()
+    (root / "profiles.ini").write_text(
+        "[Profile0]\nName=default-release\nIsRelative=1\nPath=abc123.default-release\nDefault=1\n",
+        encoding="utf-8",
+    )
+    try:
+        report = await run_import(
+            database_path=tmp_path / "db.sqlite",
+            input=FirefoxImport(home=home, platform="linux", env={}, machine="test-laptop"),
+        )
+    finally:
+        connection.close()
+
+    assert report.visits_inserted == 2
+
+
+async def test_import_from_firefox_leaves_cloud_records_and_cursors_alone(tmp_path: Path) -> None:
+    """firefox 那边没有云端记录/游标 —— 直连导入不许碰库里已有的那部分。"""
+    home = tmp_path / "home"
+    profile_with_firefox(home, [("https://a.example/", "A", micros(DAY), 1)])
+    database = tmp_path / "db.sqlite"
+    store = await open_database(database)
+    await store.store_batches(
+        [CollectionBatch(collection="history", records=[record("rec")], full=True)],
+    )
+    await SyncCursor.insert(
+        SyncCursor(collection="history", last_modified=500.0, synced_at=501.0, records=1)
+    )
+
+    report = await run_import(
+        database_path=database,
+        input=FirefoxImport(home=home, platform="linux", env={}, machine="test-laptop"),
+    )
+
+    assert report.records_inserted == 0
+    assert report.cursors_advanced == 0
+    assert [row["record_id"] for row in await SyncRecord.select()] == ["rec"]
+    assert await store.load_cursor("history") == 500.0
+
+
 async def test_export_then_import_then_query(tmp_path: Path) -> None:
     """源机器 export → 目标机器 import → list 查得到。这是这张票的验收面。"""
     source_home = tmp_path / "source"
@@ -299,7 +420,9 @@ async def test_export_then_import_then_query(tmp_path: Path) -> None:
 
     target_home = tmp_path / "target"
     target_home.mkdir()
-    report = await run_import(database_path=target_home / "db.sqlite", source=portable)
+    report = await run_import(
+        database_path=target_home / "db.sqlite", input=PortableImport(path=portable)
+    )
 
     assert report.visits_inserted == 2
     store = await open_database(target_home / "db.sqlite")
@@ -322,7 +445,8 @@ def test_blocking_wrappers_are_usable_from_sync_code(tmp_path: Path) -> None:
         machine="test-laptop",
     )
     imported = import_blocking(
-        database_path=tmp_path / "target.sqlite", source=tmp_path / "portable.sqlite"
+        database_path=tmp_path / "target.sqlite",
+        input=PortableImport(path=tmp_path / "portable.sqlite"),
     )
 
     assert exported.visits == 1

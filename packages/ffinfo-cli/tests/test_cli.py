@@ -156,3 +156,32 @@ def test_login_without_oldsync_keys_is_auth_exit_4(monkeypatch: pytest.MonkeyPat
     error = json.loads(result.stderr)["error"]
     assert error["code"] == "auth"
     assert "oldsync" in error["message"]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["import"],  # 两种输入都不给
+        ["import", "portable.sqlite", "--from-firefox"],  # 两种都给
+        ["import", "portable.sqlite", "--profile", "/tmp/nope"],  # --profile 配错输入
+    ],
+)
+def test_import_input_validation_is_exit_2_and_json(argv: list[str]) -> None:
+    """两种输入二选一 —— 给多、给少、选项配错都是用法错误（退出码 2）。"""
+    result = runner.invoke(app, argv)
+
+    assert result.exit_code == 2
+    assert json.loads(result.stderr)["error"]["code"] == "usage"
+
+
+def test_import_from_firefox_with_a_bad_profile_is_configuration_exit_3(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--profile 配 --from-firefox 是合法的；目录不对是配置问题（退出码 3），不是用法错误。"""
+    for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA"):
+        monkeypatch.setenv(name, str(tmp_path / name))
+
+    result = runner.invoke(app, ["import", "--from-firefox", "--profile", str(tmp_path / "nope")])
+
+    assert result.exit_code == 3
+    assert json.loads(result.stderr)["error"]["code"] == "configuration"

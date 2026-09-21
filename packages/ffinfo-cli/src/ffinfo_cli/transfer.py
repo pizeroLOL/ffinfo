@@ -18,15 +18,16 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict
 
 from ffinfo_cli import __version__
-from ffinfo_cli.places import read_firefox_visits
+from ffinfo_cli.places import FirefoxVisit, read_firefox_visits
 from ffinfo_cli.portable import (
     ExportSource,
     PortableCursor,
@@ -35,18 +36,50 @@ from ffinfo_cli.portable import (
     write_portable,
 )
 from ffinfo_cli.store import (
+    ApplyResult,
+    Store,
     StoredVisit,
     open_database,
 )
 
 __all__ = [
     "ExportReport",
+    "FirefoxImport",
+    "ImportInput",
     "ImportReport",
+    "PortableImport",
     "export_blocking",
     "import_blocking",
     "run_export",
     "run_import",
 ]
+
+
+type ImportInputKind = Literal["portable", "firefox"]
+"""``import`` 这次吃的是哪种输入 —— 报告要把它标出来。"""
+
+
+@dataclass(frozen=True, slots=True)
+class PortableImport:
+    """``import <便携文件>`` —— ``export`` 产出的那份 SQLite。"""
+
+    path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class FirefoxImport:
+    """``import --from-firefox`` —— 直接读本机的 ``places.sqlite``。"""
+
+    home: Path
+    platform: str
+    env: Mapping[str, str]
+    machine: str
+    """源机器名。CLI 传主机名 —— 与 ``export`` 同源，同机的同一次访问才对得上。"""
+    profile_path: Path | None = None
+    """显式指定的 profile 目录（与 ``export --profile`` 同一套发现逻辑）。"""
+
+
+type ImportInput = PortableImport | FirefoxImport
 
 
 class ExportReport(BaseModel):
@@ -84,19 +117,25 @@ class ImportReport(BaseModel):
 
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
 
-    format_version: int = 1
-    source: str
+    format_version: int = 2
+    """**2**：加了 ``input``；``source`` / ``exported_at`` 对 firefox 输入为 null。
+    **1**：只有便携文件这一种输入。"""
+    input: ImportInputKind
+    """这次用的是哪种输入：``portable``（便携文件）· ``firefox``（本机 places.sqlite）。"""
+    source: str | None = None
+    """便携文件的路径。``input`` 是 ``firefox`` 时为 null —— 那条路径没有文件。"""
     machine: str
-    """导出那台机器的名字 —— 合并两个源时靠它区分。"""
+    """数据的源机器名 —— 合并两个源时靠它区分。firefox 输入取主机名。"""
     profile: str
-    exported_at: str
+    exported_at: str | None = None
+    """便携文件里记的导出时刻。``input`` 是 ``firefox`` 时为 null。"""
     visits_inserted: int
     visits_skipped: int
     """已经有了、这次没动的。"""
     records_inserted: int
     records_updated: int
     records_kept: int
-    """本地那份更新，**没被这份导出盖回去**的条数。"""
+    """本地那份更新，**没被这份导出盖回去**的条数。firefox 输入没有云端记录，恒为 0。"""
     cursors_advanced: int
     warnings: list[str] = []
     """文件对不上账的地方（不完整、WAL 没带出来）—— **非空就要让人看见**。"""
@@ -160,53 +199,82 @@ async def run_export(
 async def run_import(
     *,
     database_path: Path,
-    source: Path,
+    input: ImportInput,
     warn: Callable[[str], None] | None = None,
     clock: Callable[[], float] = time.time,
 ) -> ImportReport:
-    """在**目标机器**上跑：把便携文件并进本地库。
+    """把 firefox 历史并进本地库。**两种输入二选一**（见 :data:`ImportInput`）。
 
-    三样东西各按各的规矩合并：
+    共通的一件事：firefox 访问按 ``(machine, url, 访问时刻)`` 认，重复导入幂等。
 
-    * firefox 访问 —— 按 ``(机器, url, 访问时刻)`` 认，重复导入幂等
+    便携文件那条还多带云端记录与游标，各按各的规矩合并：
+
     * 云端记录 —— **只在导出的那条更新时才覆盖**，不拿旧数据盖新数据
     * 同步游标 —— **只往前推**
 
+    ``--from-firefox`` 那条**不碰云端记录与游标** —— firefox 那边没有这些，报告里计数为 0。
     ``read_portable`` 发现的告警**原样带进报告**，绝不吞掉：文件不完整、WAL 没带出来，
     这些都得让调用方看见再决定。
     """
     started = clock()
-    portable = read_portable(source)
-    store = await open_database(database_path, warn=warn)
 
-    visits = await store.store_firefox_visits(
+    if isinstance(input, PortableImport):
+        portable = read_portable(input.path)
+        store = await open_database(database_path, warn=warn)
+        visits = await _store_visits(store, portable.meta.machine, portable.visits)
+        records, kept = await store.merge_sync_records(portable.records)
+        advanced = await store.merge_sync_cursors(portable.cursors)
+        return ImportReport(
+            input="portable",
+            source=str(input.path),
+            machine=portable.meta.machine,
+            profile=portable.meta.profile,
+            exported_at=portable.meta.exported_at,
+            visits_inserted=visits.inserted,
+            visits_skipped=len(portable.visits) - visits.inserted - visits.updated,
+            records_inserted=records.inserted,
+            records_updated=records.updated,
+            records_kept=kept,
+            cursors_advanced=advanced,
+            warnings=list(portable.warnings),
+            elapsed_seconds=clock() - started,
+        )
+
+    collected = read_firefox_visits(
+        home=input.home,
+        platform=input.platform,
+        env=input.env,
+        profile_path=input.profile_path,
+    )
+    store = await open_database(database_path, warn=warn)
+    visits = await _store_visits(store, input.machine, collected.visits)
+    return ImportReport(
+        input="firefox",
+        machine=input.machine,
+        profile=collected.profile.name,
+        visits_inserted=visits.inserted,
+        visits_skipped=len(collected.visits) - visits.inserted - visits.updated,
+        records_inserted=0,
+        records_updated=0,
+        records_kept=0,
+        cursors_advanced=0,
+        elapsed_seconds=clock() - started,
+    )
+
+
+async def _store_visits(store: Store, machine: str, visits: Sequence[FirefoxVisit]) -> ApplyResult:
+    """把读出来的 firefox 访问按 ``machine`` 落库 —— 两种输入共用这一段。"""
+    return await store.store_firefox_visits(
         [
             StoredVisit(
-                machine=portable.meta.machine,
+                machine=machine,
                 url=item.url,
                 title=item.title,
                 visited_at=item.visited_at,
                 visit_type=item.visit_type,
             )
-            for item in portable.visits
-        ],
-    )
-    records, kept = await store.merge_sync_records(portable.records)
-    advanced = await store.merge_sync_cursors(portable.cursors)
-
-    return ImportReport(
-        source=str(source),
-        machine=portable.meta.machine,
-        profile=portable.meta.profile,
-        exported_at=portable.meta.exported_at,
-        visits_inserted=visits.inserted,
-        visits_skipped=len(portable.visits) - visits.inserted - visits.updated,
-        records_inserted=records.inserted,
-        records_updated=records.updated,
-        records_kept=kept,
-        cursors_advanced=advanced,
-        warnings=list(portable.warnings),
-        elapsed_seconds=clock() - started,
+            for item in visits
+        ]
     )
 
 
@@ -250,7 +318,7 @@ def export_blocking(
 
 
 def import_blocking(
-    *, database_path: Path, source: Path, warn: Callable[[str], None] | None = None
+    *, database_path: Path, input: ImportInput, warn: Callable[[str], None] | None = None
 ) -> ImportReport:
     """:func:`run_import` 的同步外壳。"""
-    return asyncio.run(run_import(database_path=database_path, source=source, warn=warn))
+    return asyncio.run(run_import(database_path=database_path, input=input, warn=warn))

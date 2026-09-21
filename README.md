@@ -34,6 +34,13 @@ uv run ffinfo-cli export portable.sqlite     # 连 places.sqlite-wal 一起带�
 uv run ffinfo-cli import portable.sqlite     # 与云端数据合并，每条标出来源
 ```
 
+**人就在装了 Firefox 的那台机器上？** 不用先 export 再 import —— 直连本机 profile：
+
+```bash
+uv run ffinfo-cli import --from-firefox              # 自动找默认 profile
+uv run ffinfo-cli import --from-firefox --profile <目录>   # 手动指定
+```
+
 ## 退出码与错误 JSON
 
 成功时 stdout 上只有那份 JSON；**失败时 stdout 是空的**，stderr 上是机器可读的错误

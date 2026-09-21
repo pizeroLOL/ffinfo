@@ -32,7 +32,13 @@ from ffinfo_cli.paths import credentials_path, database_path, identity_path
 from ffinfo_cli.profiles import profiles_blocking
 from ffinfo_cli.progress import reporter_for
 from ffinfo_cli.sync import SYNCABLE_COLLECTIONS, sync_blocking
-from ffinfo_cli.transfer import export_blocking, import_blocking
+from ffinfo_cli.transfer import (
+    FirefoxImport,
+    ImportInput,
+    PortableImport,
+    export_blocking,
+    import_blocking,
+)
 
 app = typer.Typer(
     name="ffinfo-cli",
@@ -46,7 +52,7 @@ app = typer.Typer(
 # ruff 的 B008 对"默认值是函数调用"的判定在 Path 上会触发（str / int 反而不会），
 # 而 typer 的 Argument / Option 本来就是个函数调用。
 _DESTINATION: Final = typer.Argument(..., help="便携文件写到哪（.sqlite）")
-_SOURCE: Final = typer.Argument(..., help="export 产出的那份文件")
+_SOURCE: Final = typer.Argument(None, help="export 产出的那份便携文件（与 --from-firefox 二选一）")
 _PROFILE: Final = typer.Option(
     None, "--profile", help="手动指定 Firefox profile 目录（自动找不到时用）"
 )
@@ -282,11 +288,38 @@ def export(
 
 @app.command(name="import")
 def import_command(
-    source: Path = _SOURCE,
+    source: Path | None = _SOURCE,
+    from_firefox: bool = typer.Option(
+        False,
+        "--from-firefox",
+        help="改读本机 firefox 的 places.sqlite（与 <便携文件> 二选一）",
+    ),
+    profile: Path | None = _PROFILE,
 ) -> None:
-    """在**目标机器**上跑：把便携文件并进本地库，查询时与云端数据合并。"""
+    """在**目标机器**上跑：把便携文件**或**本机 firefox 并进本地库。
+
+    两种输入二选一；查询时与云端数据合并。``--from-firefox`` 那条不碰云端记录与游标。
+    """
+    import_input: ImportInput
+    if from_firefox:
+        if source is not None:
+            _fail_usage("两种输入只能给一种：<便携文件> 或 --from-firefox")
+        import_input = FirefoxImport(
+            home=Path.home(),
+            platform=sys.platform,
+            env=os.environ,
+            machine=socket.gethostname(),
+            profile_path=profile,
+        )
+    else:
+        if source is None:
+            _fail_usage("得给一种输入：<便携文件> 或 --from-firefox")
+        if profile is not None:
+            _fail_usage("--profile 只能跟 --from-firefox 一起用（便携文件里已经带着 profile 名）")
+        import_input = PortableImport(path=source)
+
     report = _guard(
-        lambda: import_blocking(database_path=database_path(), source=source, warn=_warn)
+        lambda: import_blocking(database_path=database_path(), input=import_input, warn=_warn)
     )
 
     typer.echo(report.to_json())

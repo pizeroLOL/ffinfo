@@ -11,7 +11,8 @@ ffinfo-cli login                # 浏览器里授权一次（密码不经过本�
 ffinfo-cli sync                 # 从 Firefox Sync 拉取（显式触发；进度走 stderr）
 ffinfo-cli list                 # 查询，恒输出 JSON
 ffinfo-cli export <path>        # 在【有 Firefox 的机器】上导出本地 places.sqlite
-ffinfo-cli import <path>        # 在【目标机器】上导入
+ffinfo-cli import <path>        # 在【目标机器】上导入便携文件
+ffinfo-cli import --from-firefox [--profile <目录>]  # 就在有 Firefox 的机器上，直接读本机
 ffinfo-cli profiles             # 查看本地状态（profile、密钥、各 collection 的同步进度）
 ```
 
