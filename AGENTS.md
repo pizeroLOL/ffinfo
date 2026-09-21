@@ -86,7 +86,7 @@ uv run prek install                       # 装 git 钩子
 | 工单 / spec | `.scratch/<feature-slug>/` | 本地 markdown；`.scratch/` 在 `.gitignore` 里。一票一文件：`issues/NN-<slug>.md` |
 | 工单状态 | 每个文件顶部一行 `Status:` | 取值见 [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md) |
 | 格式约定 | [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md) | 一票一文件、`## Comments` 追加在末尾 |
-| 领域文档 | [`docs/agents/domain.md`](docs/agents/domain.md) | `CONTEXT.md` 与 `docs/adr/` **目前还没建**，用到时再建 |
+| 领域词汇 | [`CONTEXT.md`](CONTEXT.md) | 一词一义；`docs/adr/` 还没建，用到时再建 |
 
 **这些都不是项目的一部分** —— 删掉不影响构建、测试、运行。
 手里没有 `.scratch/` 的话，你该读的是 [`docs/design.md`](docs/design.md)。
