@@ -72,11 +72,16 @@
 
 | # | 决策 | 备注 |
 |---|---|---|
-| 16 | CLI：**固定过滤器 + JSON** | `--since`/`--domain`/`--search`/`--limit`；**不做 SQL 直通** |
+| 16 | CLI：**固定过滤器 + 人读/JSON** | 筛选项按类型各一套（§9.1）；默认人读、`-j` 输出 JSON（§9.2）；**不做 SQL 直通** |
 | 17 | `export`/`import` 格式：**SQLite** | 因为要支持增量（schema 版本 + 游标 + 校验） |
 | 18 | 工程栈 | **Python 3.14 baseline** · uv · src layout · **pyproject 单文件配置** · ruff · pyright · pytest · pre-commit · 现代 typing · async · httpx · pydantic |
 | 19 | 许可：**MPL-2.0** | 与 Mozilla 生态一致 |
 | 20 | CLI 失败契约：**分档退出码 + stderr 错误 JSON** | 成功时 stdout 只有 JSON；失败时 stdout 为空、stderr 是 `{"error": {"code", "message"}}`，退出码表见 `README.md` |
+| 21 | CLI 用户化：**`list` 子命令 + 类型专属筛选** | `--data-type` 硬删；`list history/bookmarks/tabs` 各带自己的筛选项与报告形状，见 §9.1 |
+| 22 | CLI 输出：**默认人读，`-j/--json` 机器模式** | 错误/警告跟随模式（`-j` 时才 stderr JSON）；退出码分档不变，见 §9.2 |
+| 23 | `sync` 默认全拉白名单三件套 | 删 `--collection / -c`；`crypto` 随拉、归顶层 `protocol`；一次事务全成，见 §9.3 |
+| 24 | CLI surface：`-h` + 补全 + 拆 `commands/` 包 | 数据感知补全（`--device` / `--path` / `--profile`）静默失败；失败 helper 进 `failures.py`，见 §9.4 |
+| 25 | usage 错误也走契约 | 解析错误（未知子命令/选项、缺参数）与命令体校验同一档；`-j` 时同样是 stderr JSON，见 §9.5 |
 
 ### 2.5 库/应用职责分离（新增约束）
 
@@ -404,6 +409,8 @@ firefox 源是空的（目标机器没导入过）就自然降级成单源。**�
 
 ## 5. TODO（明确推迟，不在首版范围）
 
+- [ ] **CLI 用户化**（`-h` / 补全 / `-j` / `list` 子命令 / `sync` 默认全拉）—— 设计见 §9；
+      工单 8 张在 `.scratch/cli-user-facing/`（本地，不入版本控制）
 - [ ] **TUI**（交互式浏览）
 - [ ] **趋势 / 统计**（Top 域名、时段分布、每日趋势）
 - [ ] **申请自己的 `client_id`**
@@ -478,8 +485,8 @@ cd application-services && git sparse-checkout set components/places components/
 
 **测试策略**：逻辑全 TDD + 官方测试向量；网络层只做少量集成测试。
 **验收标准（已达成）**：`ffinfo-cli sync` 能从真实账号拉到数据并解密成功，
-`ffinfo-cli list` 输出可被 agent 消费（`list` 恒输出 JSON，没有 `--json` 这个开关 ——
-见 `README.md` 的退出码与错误契约）。
+`ffinfo-cli list` 输出可被 agent 消费。**2026-09-21 修订**：默认人读、`-j/--json` 才输出 JSON ——
+见 §9.2 与 `README.md` 的退出码与错误契约。
 
 ---
 
@@ -491,3 +498,207 @@ cd application-services && git sparse-checkout set components/places components/
 | B | `research/` 的 47M 克隆 —— 开工后保留还是删除？ | ✅ **已定案（2026-09-14）**：浅克隆只留在作者本机、不进版本控制；§6.1 改成上游链接 + 复现命令，文档不再依赖本地副本 |
 | C | **pyright 修法** | ✅ **已拍板（2026-09-14）**：**先豁免** unknown 系列（`reportUnknown*` + `reportAttributeAccessIssue`），把"自己写的类型"这层检查保住；`include` 的通配已修，检查器真的在跑（52 个文件 / 0 errors）。补依赖存根（pyrage / piccolo）记进待办，补完把豁免开回来 |
 | D | Python 版本策略：现在 `requires-python = ">=3.14"` 且真用了 PEP 758。库的卖点是「官方客户端归档后市面唯一替代品」—— 锁死在 3.14 等于掐死卖点；放宽要改写那处语法 | ✅ **已拍板（2026-09-14）：保持 3.14 不动** —— `uv sync` 会自己把解释器拉下来，"锁死 3.14"不构成使用门槛。将来真要放宽，再改写那处语法 |
+
+---
+
+## 9. CLI 用户化改造（2026-09-21）
+
+> **背景**：CLI 原先只为 agent 设计（`list` 恒输出 JSON、`--data-type` 选类型、`sync` 一次一个
+> collection）。现在要**也交给用户用**，并补齐 agent 侧的显式接口：`-h/--help`、bash 补全、
+> `--json/-j`、`sync` 默认同步除 `forms` 外的全部、`list` 变子命令。
+> 下面按架构评审的候选逐条落地 —— §9.1 起每节一个候选；评审报告本身在临时目录，不入版本控制。
+>
+> **状态**：设计已敲定，**尚未实现**（§9.1–§9.5）。
+
+### 9.1 `list` 子命令化（候选 1）
+
+**为什么**：`list --data-type X` 让一个字符串穿过校验、dispatch、字段抹除、过滤语义与读库查询；
+`ListReport` 是三种报告的超集，靠 `_EXCLUDED_FIELDS` 在序列化时抹字段。`--data-type` **硬删**，
+一个类型一个子命令，各带自己的一套筛选项与报告形状。
+
+**结构**：`ffinfo_cli/list.py`（单文件）→ 包 `ffinfo_cli/list/`：
+
+| 文件 | 职责 |
+| --- | --- |
+| `__init__.py` | 只 re-export |
+| `common.py` | 外壳取值、`parse_since`、`matches_domain` / `matches_search`、`_guard_all_failed`、`_details` |
+| `history.py` | 双源合并 → 一次访问一行 |
+| `bookmarks.py` | 建树 / 剪枝 |
+| `tabs.py` | 按设备分组 |
+| `report.py` | `type ListReport = HistoryReport \| BookmarksReport \| TabsReport` —— **只放 union 别名**；序列化见 §9.2 的 `render.py` |
+
+**报告模型不设基类**。三份模型各自声明共有字段（`format_version` / `data_type` / `generated_at` /
+`records` / `synced_at` / `age_seconds` / `skipped` / `skipped_details` / `notes`），共享的是**形状**，
+用 union 表达；序列化见 §9.2 的 `render.py`。`filters` 是类型自己的键。
+
+**`format_version` 4 → 5**。「共享一份」不变；三类各自瘦身 + 新增 `notes`。JSON 仍**扁平** ——
+`_EXCLUDED_FIELDS` 早就让三类各只剩自己的字段，形状与 v4 逐字段一致，只有版本号变化。
+
+**筛选项按类型各给一套**（`--limit` 三类都有 —— 它是结果上限，不是语义过滤）：
+
+| 子命令 | 语义过滤 | `--limit` 口径 |
+| --- | --- | --- |
+| `list history` | `--since` / `--domain` / `--search` | 访问条数 |
+| `list bookmarks` | `--path` | 书签条数（文件夹不占名额） |
+| `list tabs` | `--device` | 标签页条数（设备不占名额） |
+
+**`--path`**：`/` 分隔的**文件夹标题**路径，首尾斜杠忽略，从任意 root 起算（root 名本地化 ——
+中文 Firefox 是「书签工具栏」，不写死英文），**精确匹配、区分大小写**；同名文件夹命中多个都返回。
+命中后 `tree` **从命中文件夹重新生根**（祖先不带 —— 上下文由 `filters.path` 表达）。
+
+**`--device`**：按 `clientName`（不区分大小写）或 `clientId` 匹配，**两个都收**；不做子串（一个子串
+命中多台设备会让"筛的是哪台"变含糊）。返回形状不变：仍是按设备分组的 `clients`，只剩命中的那台。
+
+**没命中**：空结果、退出码 0。`notes` 里给出提示（如 `没有匹配路径「X」的文件夹`）—— 数据相关，
+不是用法错误；agent 不该靠退出码猜库里有没有这个文件夹。跟 `import.warnings` / `profiles.notes`
+同一路数：提示进报告，CLI 顺手回显 stderr。
+
+**删掉的**：`list --data-type`；`run_list(data_type=…)` / `list_blocking(data_type=…)` 这个字符串
+dispatcher（改为 `run_history` / `run_bookmarks` / `run_tabs` 与对应 `list_*_blocking`）；
+`DATA_TYPES` 常量；bookmarks / tabs 上 `--domain` / `--since` / `--search` 的代码路径与测试。
+`store.load_records(collection)` 不动 —— 它本来就按 collection 字符串取，三种类型各传自己的名字。
+
+### 9.2 输出渲染收进一个 seam（候选 2）
+
+**为什么**：渲染散在每个命令里 —— 每份报告自带 `to_json()`，命令各自 `typer.echo(report.to_json())`；
+"stdout 只有 JSON、stderr 是错误 JSON"这条契约在每个命令里重复。
+默认改人读、`-j` 切 JSON 之后，每份报告还要再加一条渲染路径。
+
+**`render.py`**：新增 `ffinfo_cli/render.py`，拥有**全部**输出知识。
+
+- interface：`render(report, *, machine: bool, tz: tzinfo | None = None, width: int | None = None) -> str`。
+  纯函数、返回字符串，命令层 `typer.echo` 写出 —— interface 即测试面。
+- `machine=True` → JSON（`json.dumps(report.model_dump(), …)` + `_json_default` 处理
+  `BookmarkNode` / `ClientTabs` 里的 `datetime`）；`machine=False` → 人读。
+- 分派用 `match report:` 结构模式匹配（报告的五元组 union 是封闭的，pyright 能查穷尽性），
+  每个分支一个私有 `_render_*` formatter。注册表被否 —— 丢穷尽性、多一层间接。
+- `type Report = ListReport | SyncReport | ExportReport | ImportReport | ProfilesReport`。
+  **序列化不再散在各报告 module** —— §9.1 里 `list/report.py` 只留 union 别名。
+
+**`-j / --json`**：root callback 上的全局选项，写在子命令**之前**（`ffinfo-cli -j sync` /
+`ffinfo-cli -j list history`）；各命令从 `ctx.obj` 读已解析的模式。**默认人读**。
+
+**`-j` 隐含关进度**：`sync` 的 `--progress` 默认从 `True` 改成"未指定"，在 callback 里按模式解析
+（`-j` 时默认关，显式 `--progress` 仍开）—— agent 的 stderr 上不能混进进度行。
+
+**错误与警告跟随模式**：默认 stderr 是 `错误：…`（人读），`-j` 时才是 stderr JSON。
+**退出码分档不变**。`_fail` / `_fail_usage` / `_warn` / `_emit_error` 接上已解析的模式；
+`README.md` 那张表加一句「错误 JSON 只在 `-j` 时」。
+
+**人读呈现**：
+
+| 报告 | 形态 |
+| --- | --- |
+| `list history` | 三列表格（时间 / 标题 / 域名）+ 顶部汇总（条数、源、新鲜度） |
+| `list bookmarks` | 缩进树（文件夹 `▸`、书签 `•`） |
+| `list tabs` | 设备名小标题 + 标签列表 |
+| `sync` / `export` / `import` / `profiles` | `key: value` 短摘要 |
+
+- 人读时间用**本机时区**（`tz` 可注入，测试确定）；JSON 仍是 UTC ISO —— agent 契约不动。
+- 宽度交给 `rich`（`Console` 决定；非 TTY 固定），长 URL `overflow="ellipsis"`，不手工截断；
+  `width` 可注入以便测试。
+- `notes` / `warnings` 仍走 stderr，两种模式都一样，不掺进 stdout。
+
+### 9.3 `sync` 默认全拉白名单三件套（候选 3）
+
+**为什么**：`sync` 原先只认一个用户 collection，且每次调用都顺带拉 `crypto`；「默认同步除 `forms`
+外的全部」要么循环调用（`crypto` 拉 N 遍），要么得改单数的报告形状。
+
+**目标集**：白名单 `SYNCABLE_COLLECTIONS`（`history` / `bookmarks` / `tabs`）。不含 `forms`（遗留、
+来历不明），也不含 `passwords` / `creditcards` / `addresses`（隐私，硬约束挡着）。
+**`--collection / -c` 删除** —— `sync` 永远拉这三样。`run_sync` 内部仍接 `collections` 形参供测试
+注入子集，但 CLI 不暴露。`cli.py` 里那条单值白名单校验随之消失，校验落在 `run_sync` 对 `collections`
+的处理上。
+
+**`crypto`**：仍是协议 collection，随每次 sync 拉、游标一起推进；报告里归**顶层**
+`protocol: {"crypto": 1}`，**不进** `collections` 明细 —— `collections` 是"用户要什么"，
+`protocol` 是"协议需要什么"。没有它，库里记录一条也解不开。
+
+**原子性 —— 一次事务全成**：先把 `crypto` + 三个 collection 全部拉下来，再用现有的 `store_batches`
+（本就支持多 collection 一次事务）一次写入；任一失败 → 全回滚、游标全不动、报告不产出。
+「拉全了才写库」的忠实延伸是"三项拉全才写"。代价：`tabs` 失败会连累 `history` 重拉一次增量 ——
+增量本身便宜，且不会写坏数据。
+
+**报告形状**：`format_version` **2**。顶层 `SyncReport` 持 `collections: [CollectedSync]`，每项：
+`collection` / `mode` / `records` / `inserted` / `updated` / `deleted` / `pages` / `tombstones` /
+`server_count` / `cursor_before` / `cursor_after`；顶层另放 `elapsed_seconds` / `database` /
+`protocol`。顶层是"总账 + 明细"，agent 既能看总量也能下钻。
+
+**抽取的单元**：不设 `_sync_one`（一次事务下没有"逐 collection 提交"这个单元）。抽
+`_report_entry(name, fetch, applied, cursor_before) -> CollectedSync` 收掉逐项报告拼装
+（`mode` / `server_count` / `tombstones` 的口径只写一处）；fetch 循环保持内联，只把 `targets`
+泛化成 `(*collections, *_PROTOCOL_COLLECTIONS)`。
+
+**串行、单个进度条**：backoff 是服务器对**整个账号**的要求，并发会让"谁触发退避、要不要取消
+其它请求"变复杂；串行下复用同一个 `ProgressReporter`（进度行带 collection 名，天然区分）。
+
+**`--full`**：作用于全部 target（含 `crypto`），不加特例 —— `crypto` 只一条记录，全量替换零成本。
+
+### 9.4 CLI surface：`-h` / 补全 / 拆 `commands` 包（候选 4）
+
+**范围修正**：候选 1 / 3 一落，「同一个取值活在多处」的痛点自动消失 —— `DATA_TYPES` 删了、
+`--collection` 删了，`SYNCABLE_COLLECTIONS` 只在 `run_sync` 内部用、不再与 help 重复。
+所以这节只剩：开 `-h`、开补全、把人读 help 写好、拆 `cli.py`。**不新建 surface module** ——
+Typer 的 app 定义即 surface。
+
+**开关**：
+
+- `context_settings={"help_option_names": ["-h", "--help"]}` 开短选项。
+- `add_completion=True` —— Typer 自动提供 `--install-completion` / `--show-completion`，
+  支持 bash / zsh / fish（用户点名 bash，但不必只做 bash）。
+- `README.md` 加一行 `ffinfo-cli --install-completion bash`。
+
+**数据感知补全**：
+
+| 选项 | 值来源 | 是否解密 |
+| --- | --- | --- |
+| `list tabs --device` | `tabs` 记录里的设备名（+ `clientId`） | 要 |
+| `list bookmarks --path` | `bookmarks` 记录的文件夹路径 | 要 |
+| `--profile` | `places` 的 profile 探测 | 否（明文） |
+
+- 开销：每次 TAB 起新进程，age 解凭据（X25519）→ HKDF → sqlite → AES-GCM；本地库小，
+  几十毫秒量级，**先不做缓存**（YAGNI）。
+- **静默失败**：回调整体 `try/except Exception` → 空列表；**绝不写 stderr、绝不非零退出** ——
+  补全错误污染 shell 最招人烦。库不存在 / 没凭据 / 解密失败 / 记录坏掉，一律静默。
+- 回调跟着命令走（定义在各自的 `commands/<name>.py`）；共享的"读库列设备 / 路径"是内部 helper。
+
+**拆 `cli.py`**：
+
+- 新增 `ffinfo_cli/commands/` 包：`login.py` / `sync.py` / `list.py` / `transfer.py` / `profiles.py`，
+  各自 `typer.Typer()` 子 app + 自己的补全回调。
+- 失败 helper（`_guard` / `_fail` / `_fail_usage` / `error_payload` / `_emit_error` / `_warn`）
+  挪进 `ffinfo_cli/failures.py` —— 断掉 `cli` ↔ `commands` 的环。
+- `cli.py` 只做装配（root app、callback、`add_typer`）+ entry point；
+  `[project.scripts]` 的 `ffinfo_cli.cli:app` 不变。
+- 选 `commands/` 而非 `cli/` 包，是为了避开与顶层逻辑 module（`sync.py` / `login.py` /
+  `profiles.py` / `transfer.py`）的同名冲突。
+
+### 9.5 usage 错误也走契约（候选 5）
+
+**为什么**：§9.2 把错误契约改成"跟随模式"，但只覆盖了命令体里的 `_fail_usage`。
+Click / Typer **自己解析阶段**的错误（未知子命令、未知选项、缺参数、enum 不合法）绕过它，
+走 Click 默认输出 —— `-j` 下 agent 会拿到人类文本。
+
+**拦截**：自定义 `Typer` 子类覆盖 `main()`，把 `click.UsageError` 接到同一套渲染：
+
+```python
+try:
+    super().main(...)
+except click.UsageError as exc:
+    # 按模式渲染 + sys.exit(exc.exit_code)  # 默认 2
+```
+
+- 模式判定：进入 `main()` 前先扫一遍 `args` 里的 `-j` / `--json`（best-effort —— 解析失败时
+  callback 没跑、`ctx.obj` 为空；扫不到就人读）。
+- 放 `ffinfo_cli/failures.py`，与 `_fail_usage` 同处；`cli.py` 用它建 app。
+  三个失败来源（命令体校验 / 解析错误 / 兜底异常）的渲染走同一条路。
+
+**边界**：
+
+- `click.UsageError`（`NoSuchOption` / `MissingParameter` / `BadParameter` / `NoSuchCommand`）
+  → 退出码 **2**。
+- `--help` / `--version` 抛的是 `click.exceptions.Exit(0)`，**不是** `UsageError` ——
+  不走这条路，stdout 永远人读（即使带了 `-j`）。
+- shell 补全（`--show-completion` / `--install-completion`）同样走 `Exit`，不受影响。
+
+**README**：退出码表补一句「解析错误与命令体校验同一档（`usage` / 退出码 2），`-j` 时同样是 JSON」。

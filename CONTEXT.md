@@ -56,7 +56,7 @@ Sync 里的一个命名数据集（`history` / `bookmarks` / `tabs`，外加协�
 _Avoid_: 表、集合
 
 **数据类型 (data type)**:
-CLI `--data-type` 的取值（`history` / `bookmarks` / `tabs`）。
+`list` 的子命令（`history` / `bookmarks` / `tabs`）。
 它是 collection 在用户接口层的名字，不是另一个东西。
 _Avoid_: collection
 
@@ -172,3 +172,14 @@ _Avoid_: 丢失
 **新鲜度**:
 `synced_at`（该 collection 上次成功 sync 的时间）与 `age_seconds`（距今多久）。
 _Avoid_: 更新时间
+
+## CLI 输出
+
+**人读 / 机器模式**:
+CLI 的两种输出形态。**默认人读**（给人看的排版）；`-j` / `--json` 切到**机器模式** ——
+stdout 是纯 JSON，失败时 stderr 也是错误 JSON。退出码两种模式一致。
+_Avoid_: 正常模式、调试模式
+
+**文件夹路径 (path)**:
+书签树里从某个 root 到某个文件夹的标题链，`/` 分隔。`list bookmarks --path` 用它筛出子树。
+_Avoid_: 目录、文件夹名
