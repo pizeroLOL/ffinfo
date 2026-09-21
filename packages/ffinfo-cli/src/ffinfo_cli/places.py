@@ -19,6 +19,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Final
 
 from ffinfo.errors import ConfigurationError
@@ -27,11 +28,13 @@ from ffinfo.timestamps import from_microseconds, to_microseconds
 __all__ = [
     "PLACES_FILENAME",
     "FirefoxVisit",
+    "FirefoxVisits",
     "Profile",
     "Snapshot",
     "discover_profiles",
     "find_profile",
     "firefox_roots",
+    "read_firefox_visits",
     "read_visits",
     "snapshot_places",
 ]
@@ -180,6 +183,22 @@ class FirefoxVisit:
     visit_type: int
 
 
+@dataclass(frozen=True, slots=True)
+class FirefoxVisits:
+    """一次「本机 firefox → 访问」的产物 —— 快照是临时的，只留下这些。"""
+
+    profile: Profile
+    """读的是哪个 profile（名字给人看，路径给报告用）。"""
+
+    visits: tuple[FirefoxVisit, ...]
+
+    wal_bytes: int
+    """快照时源库 ``-wal`` 的字节数。**大于 0 说明当时 Firefox 正开着**。"""
+
+    wal_carried: bool
+    """``-wal`` 有没有一起带出来。"""
+
+
 def snapshot_places(database: Path, *, into: Path) -> Snapshot:
     """把 ``places.sqlite`` 连同 ``-wal`` / ``-shm`` 复制出来，再把 WAL 折进主文件。
 
@@ -248,6 +267,30 @@ def read_visits(database: Path, *, since: datetime | None = None) -> tuple[Firef
             visit_type=int(row["visit_type"]),
         )
         for row in rows
+    )
+
+
+def read_firefox_visits(
+    *,
+    home: Path,
+    platform: str,
+    env: Mapping[str, str],
+    profile_path: Path | None = None,
+) -> FirefoxVisits:
+    """找 profile → 快照（含 WAL 折叠与自检）→ 读出访问。**快照是临时的**，返回前已清理。
+
+    **这条路径只准有一份实现。** 只拷主文件不会报错、只会静默少掉 ``-wal`` 里的最近访问
+    （见 :func:`snapshot_places`）—— ``export`` 与 firefox 直连导入都走它，谁也不另写一份。
+    """
+    profile = find_profile(home=home, platform=platform, env=env, explicit=profile_path)
+    with TemporaryDirectory(prefix="ffinfo-snapshot-") as workdir:
+        snapshot = snapshot_places(profile.path / PLACES_FILENAME, into=Path(workdir))
+        visits = read_visits(snapshot.database)
+    return FirefoxVisits(
+        profile=profile,
+        visits=visits,
+        wal_bytes=snapshot.wal_bytes,
+        wal_carried="-wal" in snapshot.sidecars,
     )
 
 

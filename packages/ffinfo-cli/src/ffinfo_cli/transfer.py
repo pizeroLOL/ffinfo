@@ -21,13 +21,12 @@ import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict
 
 from ffinfo_cli import __version__
-from ffinfo_cli.places import PLACES_FILENAME, find_profile, read_visits, snapshot_places
+from ffinfo_cli.places import read_firefox_visits
 from ffinfo_cli.portable import (
     ExportSource,
     PortableCursor,
@@ -125,32 +124,30 @@ async def run_export(
     库还不存在（没 login 过）也照样能 export，那就只有 firefox 那部分。
     """
     started = clock()
-    profile = find_profile(home=home, platform=platform, env=env, explicit=profile_path)
-
-    with TemporaryDirectory(prefix="ffinfo-export-") as workdir:
-        snapshot = snapshot_places(profile.path / PLACES_FILENAME, into=Path(workdir))
-        visits = read_visits(snapshot.database)
-        records, cursors = await _cloud_state(database_path)
-        meta = write_portable(
-            destination,
-            source=ExportSource(
-                machine=machine,
-                profile=profile.name,
-                generator=f"ffinfo-cli {__version__}",
-                wal_bytes=snapshot.wal_bytes,
-                wal_carried="-wal" in snapshot.sidecars,
-            ),
-            visits=visits,
-            records=records,
-            cursors=cursors,
-            exported_at=datetime.fromtimestamp(clock(), tz=UTC).isoformat(),
-        )
+    collected = read_firefox_visits(
+        home=home, platform=platform, env=env, profile_path=profile_path
+    )
+    records, cursors = await _cloud_state(database_path)
+    meta = write_portable(
+        destination,
+        source=ExportSource(
+            machine=machine,
+            profile=collected.profile.name,
+            generator=f"ffinfo-cli {__version__}",
+            wal_bytes=collected.wal_bytes,
+            wal_carried=collected.wal_carried,
+        ),
+        visits=collected.visits,
+        records=records,
+        cursors=cursors,
+        exported_at=datetime.fromtimestamp(clock(), tz=UTC).isoformat(),
+    )
 
     return ExportReport(
         destination=str(destination),
         machine=machine,
-        profile=profile.name,
-        profile_path=str(profile.path),
+        profile=collected.profile.name,
+        profile_path=str(collected.profile.path),
         schema_version=meta.schema_version,
         visits=meta.visits,
         records=meta.sync_records,
