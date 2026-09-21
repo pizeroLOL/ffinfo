@@ -183,7 +183,7 @@ class Store:
         }
         await SyncRecord.delete().where(SyncRecord.collection == collection)
         if rows:
-            await SyncRecord.insert(*rows)
+            await _insert_rows(SyncRecord, rows)
         return ApplyResult(
             inserted=len(after - before),
             updated=len(after & before),
@@ -221,7 +221,7 @@ class Store:
                 updates.append((entry[0], record))
 
         if fresh:
-            await SyncRecord.insert(*fresh)
+            await _insert_rows(SyncRecord, fresh)
         # 逐行 UPDATE 是有意的取舍：增量里真正"变了的"通常是个位数，一条条写最直白；
         # 拼一条 CASE 批量得先证明它值得 —— 现在不值。
         for row_id, record in updates:
@@ -356,7 +356,7 @@ class Store:
                 updates.append((found[0], item.title))
 
         if fresh:
-            await FirefoxVisitRow.insert(*fresh)
+            await _insert_rows(FirefoxVisitRow, fresh)
         for row_id, title in updates:
             await FirefoxVisitRow.update({FirefoxVisitRow.title: title}).where(
                 FirefoxVisitRow.id == row_id
@@ -423,7 +423,7 @@ class Store:
                 kept += 1
 
         if fresh:
-            await SyncRecord.insert(*fresh)
+            await _insert_rows(SyncRecord, fresh)
         for item in updates:
             await SyncRecord.update(
                 {
@@ -642,6 +642,21 @@ async def _enforce_record_identity(
         f"CREATE UNIQUE INDEX IF NOT EXISTS {_RECORD_IDENTITY_INDEX}"
         " ON sync_records (collection, record_id)"
     )
+
+
+_INSERT_CHUNK: Final = 100
+"""一次 ``INSERT`` 最多塞这么多行。
+
+piccolo 把整批拼成一条多值 ``INSERT``，变量数 = 行数 × 列数；SQLite 的
+``SQLITE_MAX_VARIABLE_NUMBER`` 老版本只有 **999**（新版 32766），上万条真实历史
+就会撞上 ``too many SQL variables``。按最保守的 999 除以最宽的表（7 列）留足余量取 100。
+"""
+
+
+async def _insert_rows[T: Table](table: type[T], rows: Sequence[T]) -> None:
+    """分批 ``INSERT`` —— 绕过 SQLite 的变量数上限。空列表什么都不做。"""
+    for start in range(0, len(rows), _INSERT_CHUNK):
+        await table.insert(*rows[start : start + _INSERT_CHUNK])
 
 
 def _newest_per_id(records: Sequence[EncryptedBso]) -> list[EncryptedBso]:

@@ -118,6 +118,20 @@ async def test_title_change_updates_instead_of_duplicating(tmp_path: Path) -> No
     assert [item.title for item in stored] == ["新标题"]
 
 
+async def test_many_visits_do_not_hit_the_sql_variable_limit(tmp_path: Path) -> None:
+    """真实历史动辄上万条 —— 不能把所有行塞进一条 INSERT（SQLite 变量数有上限）。"""
+    store = await open_database(tmp_path / "db.sqlite")
+    many = [
+        visit(f"https://example.test/{index}", seconds=1_700_000_000 + index)
+        for index in range(7000)
+    ]
+
+    result = await store.store_firefox_visits(many)
+
+    assert result.inserted == 7000
+    assert len(await store.load_firefox_visits()) == 7000
+
+
 async def test_load_returns_empty_on_a_fresh_database(tmp_path: Path) -> None:
     """**firefox 源缺失要能降级** —— 没导入过就是空的，不是错误。"""
     store = await open_database(tmp_path / "db.sqlite")
