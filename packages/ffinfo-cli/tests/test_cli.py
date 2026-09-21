@@ -71,7 +71,6 @@ def test_unknown_error_falls_back_but_keeps_the_message() -> None:
         ["list", "history", "--since", "上周三"],
         ["sync", "--page-size", "0"],
         ["sync", "--page-size", "101"],
-        ["sync", "--collection", "forms"],
     ],
 )
 def test_usage_errors_are_exit_2_and_json(argv: list[str]) -> None:
@@ -84,6 +83,17 @@ def test_usage_errors_are_exit_2_and_json(argv: list[str]) -> None:
 def test_data_type_option_is_rejected() -> None:
     """``--data-type`` 硬删 —— 老用法现在就是用法错误（退出码 2）。"""
     result = runner.invoke(app, ["list", "--data-type", "history"])
+
+    assert result.exit_code == 2
+
+
+@pytest.mark.parametrize("option", ["--collection", "-c"])
+def test_sync_collection_option_is_rejected(option: str) -> None:
+    """``sync`` 永远拉白名单三件套 —— ``--collection / -c`` 硬删（用法错误、退出 2）。
+
+    未知选项现在是**解析阶段**错误，走 Click 默认输出；08 会把它接到错误 JSON 契约上。
+    """
+    result = runner.invoke(app, ["sync", option, "history"])
 
     assert result.exit_code == 2
 

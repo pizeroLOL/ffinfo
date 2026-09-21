@@ -1,6 +1,9 @@
 """``ffinfo-cli sync``：白名单、落盘、失败不写库。
 
 全部离线：HTTP 走 ``httpx.MockTransport``，凭据写进临时目录。
+
+大多数用例只注入 ``history`` 一个 collection（``run_sync`` 的 ``collections`` 形参）——
+默认三件套与协议数据另有专测，免得每条断言都被另外两个 collection 的页数搅浑。
 """
 
 # 上面三行：同上 —— 测试直接查表类验证落库结果。
@@ -24,7 +27,7 @@ from ffinfo.errors import AuthError, BackoffError, ConfigurationError, SyncProto
 from ffinfo.keys import OLD_SYNC_SCOPE, ScopedKey
 from ffinfo.oauth import Credentials
 from ffinfo_cli.store import SyncCursor, SyncRecord, open_database
-from ffinfo_cli.sync import SYNCABLE_COLLECTIONS, SyncReport, run_sync
+from ffinfo_cli.sync import SYNCABLE_COLLECTIONS, CollectedSync, SyncReport, run_sync
 
 NOW = 1_789_320_612.0
 
@@ -142,10 +145,16 @@ async def cursor(tmp_path: Path, collection: str = "history") -> float | None:
     return await store.load_cursor(collection)
 
 
+def only(report: SyncReport) -> CollectedSync:
+    """只注入了一个 collection 的用例 —— 取出那唯一一份明细。"""
+    assert len(report.collections) == 1
+    return report.collections[0]
+
+
 async def sync(
     tmp_path: Path,
     fake: FakeSync,
-    collection: str = "history",
+    collections: tuple[str, ...] = ("history",),
     *,
     credentials: tuple[Path, Path] | None = None,
     **kwargs: Any,
@@ -156,7 +165,7 @@ async def sync(
         identity_path=identity_path,
         credentials_path=credentials_path,
         database_path=tmp_path / "db.sqlite",
-        collection=collection,
+        collections=collections,
         http=httpx.AsyncClient(transport=httpx.MockTransport(fake.handler)),
         clock=lambda: NOW,
         **kwargs,
@@ -172,7 +181,7 @@ async def test_unsafe_collections_are_refused(tmp_path: Path, collection: str) -
     fake.counts = {collection: 42768}
 
     with pytest.raises(ConfigurationError, match="只拉这几个"):
-        await sync(tmp_path, fake, collection=collection)
+        await sync(tmp_path, fake, collections=(collection,))
 
     assert fake.requests == []  # 连网都不上
     assert not (tmp_path / "db.sqlite").exists()
@@ -190,12 +199,13 @@ async def test_happy_path_stores_records(tmp_path: Path) -> None:
     fake.pages = [[bso("a"), bso("b")]]
 
     report = await sync(tmp_path, fake)
+    entry = only(report)
 
-    assert report.collection == "history"
-    assert report.records == 2
-    assert report.pages == 1
-    assert report.tombstones == 0
-    assert report.server_count == 2
+    assert entry.collection == "history"
+    assert entry.records == 2
+    assert entry.pages == 1
+    assert entry.tombstones == 0
+    assert entry.server_count == 2
     assert report.database == str(tmp_path / "db.sqlite")
 
     await open_database(tmp_path / "db.sqlite")
@@ -212,8 +222,8 @@ async def test_protocol_data_is_pulled_alongside(tmp_path: Path) -> None:
 
     assert report.protocol == {"crypto": 1}
     await open_database(tmp_path / "db.sqlite")
-    stored = await SyncRecord.select().where(SyncRecord.collection == "crypto")
-    assert [row["record_id"] for row in stored] == ["keys"]
+    stored_records = await SyncRecord.select().where(SyncRecord.collection == "crypto")
+    assert [row["record_id"] for row in stored_records] == ["keys"]
 
 
 async def test_tombstones_are_counted_and_dropped(tmp_path: Path) -> None:
@@ -223,10 +233,11 @@ async def test_tombstones_are_counted_and_dropped(tmp_path: Path) -> None:
     fake.pages = [[bso("a"), {"id": "gone", "modified": 1.0, "payload": None}]]
 
     report = await sync(tmp_path, fake)
+    entry = only(report)
 
-    assert report.records == 1
-    assert report.tombstones == 1
-    assert report.server_count == 2
+    assert entry.tombstones == 1
+    assert entry.server_count == 2
+    assert await stored(tmp_path) == 1
 
 
 async def test_report_json_is_machine_readable(tmp_path: Path) -> None:
@@ -238,9 +249,23 @@ async def test_report_json_is_machine_readable(tmp_path: Path) -> None:
     report = await sync(tmp_path, fake)
     payload = json.loads(report.to_json())
 
-    assert payload["format_version"] == 1
-    assert payload["collection"] == "history"
-    assert set(payload) >= {"records", "pages", "tombstones", "server_count", "database"}
+    assert payload["format_version"] == 2
+    assert set(payload) >= {"collections", "elapsed_seconds", "database", "protocol"}
+    entry = payload["collections"][0]
+    assert entry["collection"] == "history"
+    assert set(entry) >= {
+        "collection",
+        "mode",
+        "records",
+        "inserted",
+        "updated",
+        "deleted",
+        "pages",
+        "tombstones",
+        "server_count",
+        "cursor_before",
+        "cursor_after",
+    }
 
 
 async def test_token_server_request_carries_key_id(tmp_path: Path) -> None:
@@ -304,7 +329,7 @@ async def test_expired_credentials_are_refreshed_instead_of_asking_again(tmp_pat
 
     report = await sync(tmp_path, fake, credentials=credentials)
 
-    assert report.inserted == 1
+    assert only(report).inserted == 1
     sent = refresh_requests(fake)[0]
     body = parse_qs(sent.content.decode())
     assert body["grant_type"] == ["refresh_token"]
@@ -358,10 +383,11 @@ async def test_first_sync_is_full(tmp_path: Path) -> None:
     fake.pages = [[bso("a"), bso("b")]]
 
     report = await sync(tmp_path, fake)
+    entry = only(report)
 
-    assert report.mode == "full"
-    assert report.cursor_before is None
-    assert report.cursor_after == 1789320600.12
+    assert entry.mode == "full"
+    assert entry.cursor_before is None
+    assert entry.cursor_after == 1789320600.12
     assert "newer" not in storage_requests(fake, "history")[0].url.params
     assert await cursor(tmp_path) == 1789320600.12
 
@@ -375,10 +401,11 @@ async def test_second_sync_is_incremental(tmp_path: Path) -> None:
 
     fake.pages = [[bso("b")]]
     report = await sync(tmp_path, fake)
+    entry = only(report)
 
-    assert report.mode == "incremental"
-    assert report.cursor_before == 1789320600.12
-    assert report.inserted == 1
+    assert entry.mode == "incremental"
+    assert entry.cursor_before == 1789320600.12
+    assert entry.inserted == 1
     assert storage_requests(fake, "history")[1].url.params["newer"] == "1789320600.12"
     assert await stored(tmp_path) == 2
 
@@ -392,11 +419,12 @@ async def test_incremental_with_no_changes(tmp_path: Path) -> None:
 
     fake.pages = [[]]
     report = await sync(tmp_path, fake)
+    entry = only(report)
 
-    assert report.mode == "incremental"
-    assert report.inserted == 0
-    assert report.updated == 0
-    assert report.deleted == 0
+    assert entry.mode == "incremental"
+    assert entry.inserted == 0
+    assert entry.updated == 0
+    assert entry.deleted == 0
     assert await stored(tmp_path) == 1
 
 
@@ -409,9 +437,10 @@ async def test_incremental_updates_a_changed_record(tmp_path: Path) -> None:
 
     fake.pages = [[{"id": "a", "modified": 1789320999.0, "payload": '{"ciphertext":"BBBB"}'}]]
     report = await sync(tmp_path, fake)
+    entry = only(report)
 
-    assert report.updated == 1
-    assert report.inserted == 0
+    assert entry.updated == 1
+    assert entry.inserted == 0
     assert await stored(tmp_path) == 1
 
 
@@ -424,8 +453,9 @@ async def test_incremental_drops_tombstoned_records(tmp_path: Path) -> None:
 
     fake.pages = [[tombstone("b")]]
     report = await sync(tmp_path, fake)
+    entry = only(report)
 
-    assert report.deleted == 1
+    assert entry.deleted == 1
     assert await stored(tmp_path) == 1
 
 
@@ -439,11 +469,12 @@ async def test_full_sync_reports_what_disappeared(tmp_path: Path) -> None:
     fake.counts = {"history": 1}
     fake.pages = [[bso("a")]]
     report = await sync(tmp_path, fake, full=True)
+    entry = only(report)
 
-    assert report.mode == "full"
-    assert report.deleted == 1
-    assert report.updated == 1
-    assert report.inserted == 0
+    assert entry.mode == "full"
+    assert entry.deleted == 1
+    assert entry.updated == 1
+    assert entry.inserted == 0
     assert await stored(tmp_path) == 1
 
 
@@ -474,7 +505,7 @@ async def test_full_flag_ignores_the_cursor(tmp_path: Path) -> None:
     fake.pages = [[bso("a"), bso("b")]]
     report = await sync(tmp_path, fake, full=True)
 
-    assert report.mode == "full"
+    assert only(report).mode == "full"
     assert "newer" not in storage_requests(fake, "history")[1].url.params
     assert await stored(tmp_path) == 2
 
@@ -493,7 +524,7 @@ async def test_missing_cursor_falls_back_to_full(tmp_path: Path) -> None:
     fake.pages = [[bso("a"), bso("b")]]
     report = await sync(tmp_path, fake)
 
-    assert report.mode == "full"
+    assert only(report).mode == "full"
     assert await stored(tmp_path) == 2
 
 
@@ -509,3 +540,49 @@ async def test_protocol_collections_are_incremental_too(tmp_path: Path) -> None:
 
     assert storage_requests(fake, "crypto")[1].url.params["newer"] == "1.00"
     assert await cursor(tmp_path, "crypto") == 1.0
+
+
+async def test_default_sync_pulls_the_whole_allowlist(tmp_path: Path) -> None:
+    """白名单三件套一次拉全、一次事务写入；协议数据 crypto 只拉一遍、归顶层。"""
+    fake = FakeSync()
+    fake.counts = {"history": 1, "bookmarks": 1, "tabs": 1}
+    fake.pages = [[bso("h")], [bso("b")], [bso("t")]]
+
+    report = await sync(tmp_path, fake, collections=SYNCABLE_COLLECTIONS)
+
+    assert [entry.collection for entry in report.collections] == list(SYNCABLE_COLLECTIONS)
+    assert report.protocol == {"crypto": 1}
+    assert len(storage_requests(fake, "crypto")) == 1
+    for name in SYNCABLE_COLLECTIONS:
+        assert await stored(tmp_path, name) == 1
+        assert await cursor(tmp_path, name) == 1789320600.12
+
+
+async def test_a_failing_collection_leaves_everything_untouched(tmp_path: Path) -> None:
+    """三件套里最后一件失败 —— 前两件也不许落库，游标一个都不推进。"""
+    fake = FakeSync()
+    fake.counts = {"history": 1, "bookmarks": 1, "tabs": 5}
+    fake.pages = [[bso("h")], [bso("b")], [bso("t")]]
+
+    with pytest.raises(SyncProtocolError):
+        await sync(tmp_path, fake, collections=SYNCABLE_COLLECTIONS)
+
+    for name in SYNCABLE_COLLECTIONS:
+        assert await stored(tmp_path, name) == 0
+        assert await cursor(tmp_path, name) is None
+    assert await cursor(tmp_path, "crypto") is None
+
+
+async def test_full_reaches_every_target_including_crypto(tmp_path: Path) -> None:
+    """``--full`` 没有特例：用户三件套与协议数据全部走全量（请求里不带 ``newer``）。"""
+    fake = FakeSync()
+    fake.counts = {"history": 1, "bookmarks": 1, "tabs": 1}
+    fake.pages = [[bso("h")], [bso("b")], [bso("t")]]
+    await sync(tmp_path, fake, collections=SYNCABLE_COLLECTIONS)
+
+    fake.pages = [[bso("h")], [bso("b")], [bso("t")]]
+    report = await sync(tmp_path, fake, collections=SYNCABLE_COLLECTIONS, full=True)
+
+    assert all(entry.mode == "full" for entry in report.collections)
+    for name in (*SYNCABLE_COLLECTIONS, "crypto"):
+        assert "newer" not in storage_requests(fake, name)[-1].url.params

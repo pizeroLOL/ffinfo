@@ -17,12 +17,6 @@ _MAX_PAGE_SIZE: Final = 100
 
 
 def sync(
-    collection: str = typer.Option(
-        "history",
-        "--collection",
-        "-c",
-        help="要拉取的 collection：history / bookmarks / tabs（白名单，其它一律拒绝）",
-    ),
     page_size: int = typer.Option(100, "--page-size", help="每页拉多少条（服务器上限 100）"),
     full: bool = typer.Option(
         False,
@@ -33,13 +27,13 @@ def sync(
         True, "--progress/--no-progress", help="要不要在 stderr 上显示拉到第几页了"
     ),
 ) -> None:
-    """从 Firefox Sync 拉取数据并落盘。默认只拉上次同步之后的变更。
+    """从 Firefox Sync 拉取白名单三件套（history + bookmarks + tabs）并落盘。
+
+    目标固定，没有 ``--collection``；协议数据 ``crypto`` 顺带拉、归报告的顶层 ``protocol``。
+    三件套全拉下来才用一次事务写入 —— 任一失败则全回滚、游标全不动。
 
     进度走 **stderr**，stdout 上仍然只有那份 JSON。
     """
-    if collection not in SYNCABLE_COLLECTIONS:
-        allowed = "、".join(sorted(SYNCABLE_COLLECTIONS))
-        fail_usage(f"不拉 collection「{collection}」—— 本项目只拉这几个：{allowed}")
     if not 1 <= page_size <= _MAX_PAGE_SIZE:
         fail_usage(f"--page-size 要在 1..{_MAX_PAGE_SIZE} 之间（服务器上限），收到 {page_size}")
 
@@ -50,7 +44,7 @@ def sync(
                 identity_path=identity_path(),
                 credentials_path=credentials_path(),
                 database_path=database_path(),
-                collection=collection,
+                collections=SYNCABLE_COLLECTIONS,
                 page_size=page_size,
                 full=full,
                 on_progress=reporter,
