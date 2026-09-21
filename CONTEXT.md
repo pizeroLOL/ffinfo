@@ -46,8 +46,9 @@ _Avoid_: BSO、条目
 _Avoid_: 条目、记录
 
 **墓碑 (tombstone)**:
-删除标记。云端 BSO 的墓碑是 `payload` 为 null，书签的墓碑是 `{"deleted": true}` ——
-两种编码，同一个意思：这条没了。
+删除标记。两种编码，同一个意思：这条没了 ——
+云端 BSO 的墓碑是 `payload` 为 null；**历史与书签**的应用层墓碑是明文 `{"deleted": true}`
+（这种常缺主体字段，要在模型校验之前认出来）。
 _Avoid_: 删除记录
 
 **collection**:

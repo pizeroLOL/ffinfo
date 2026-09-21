@@ -6,10 +6,14 @@
 
 放在这里而不是各写一遍：三份拷贝已经开始漂了（跳过原因的文案、墓碑的判法），
 而且**单条坏掉不连坐**是三个 collection 共同的硬要求，行为得一致。
+
+墓碑有两种编码，都在这里认：BSO 的 ``payload`` 为 ``null``，以及明文里的
+``{"deleted": true}``（**历史与书签都有**，这种常缺主体字段，不能交给模型去验）。
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
@@ -64,13 +68,24 @@ def decrypt_records[ModelT: BaseModel, ItemT](
             continue
         try:
             cleartext = EncryptedPayload.from_json(payload).decrypt(key)
-            record = model.model_validate_json(cleartext)
-        except (DecryptionError, ValidationError) as exc:
+        except DecryptionError as exc:
             skipped.append((record_id, _reason(exc, what)))
             continue
-        # 书签的墓碑长成 {"deleted": true} —— 模型里有这个字段的才看它
-        if getattr(record, "deleted", False):
+        # 应用层墓碑：``{"id": …, "deleted": true}`` —— 解密成功、JSON 也合法，
+        # 只是“这条在别的设备上被删了”。**必须在模型校验之前认出来**：墓碑可以缺主体字段
+        # （历史的墓碑就没有 ``histUri``），交给模型去验会把它误判成“明文不合法”。
+        try:
+            decoded = json.loads(cleartext)
+        except json.JSONDecodeError as exc:
+            skipped.append((record_id, _reason(exc, what)))
+            continue
+        if isinstance(decoded, dict) and "deleted" in decoded and decoded["deleted"] is True:
             tombstones += 1
+            continue
+        try:
+            record = model.model_validate(decoded)
+        except ValidationError as exc:
+            skipped.append((record_id, _reason(exc, what)))
             continue
         items.extend(expand(record, record_id))
 

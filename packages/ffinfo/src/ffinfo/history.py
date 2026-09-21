@@ -9,11 +9,13 @@ Sync 里的历史记录长这样（``places/src/history_sync/record.rs``）::
         "visits": [{"date": 1788444520420000, "type": 1}],
     }
 
-三个容易踩的点：
+四个容易踩的点：
 
 1. ``date`` 是**微秒**（``ServerVisitTimestamp`` = 毫秒 × 1000），不是秒也不是毫秒
 2. 访问类型的字段名是 ``type``，不是 ``transition``（Rust 那边才叫 transition）
 3. ``title`` 可能是 ``null`` 或者干脆没有 —— 上游明确处理过这种情况，我们也得认
+4. 墓碑明文 ``{"id": …, "deleted": true}`` 缺 ``histUri`` —— 解密层在模型校验前先认出来
+   （见 ``ffinfo/_decrypt.py``）
 
 一条记录可以有**多次访问**（最多 20 次，见 ``docs/design.md`` §3.1）。
 本模块把它们拍平成"一次访问一行" —— 那才是"浏览历史"该有的样子。
