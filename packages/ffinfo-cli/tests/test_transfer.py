@@ -21,7 +21,7 @@ import pytest
 
 from ffinfo.errors import ConfigurationError
 from ffinfo.storage import EncryptedBso
-from ffinfo_cli.places import FirefoxVisit
+from ffinfo_cli.places import FirefoxVisit, HostContext
 from ffinfo_cli.portable import (
     ExportSource,
     PortableCursor,
@@ -51,6 +51,10 @@ DAY = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
 MOMENT = "2026-09-14T02:00:00+00:00"
 
 
+def host(home: Path, platform: str = "linux", env: dict[str, str] | None = None) -> HostContext:
+    return HostContext(home=home, platform=platform, env=env if env is not None else {})
+
+
 def profile_with_firefox(home: Path, visits: list[tuple[str, str | None, int, int]]) -> Path:
     """造一个"这台机器装过 Firefox"的家目录，返回 profile 目录。"""
     root = home / ".mozilla" / "firefox"
@@ -70,9 +74,7 @@ async def export_from(
     return await run_export(
         database_path=database if database is not None else home / "ffinfo.sqlite",
         destination=destination,
-        home=home,
-        platform="linux",
-        env={},
+        host=host(home),
         machine="test-laptop",
         **kwargs,  # type: ignore[arg-type]
     )
@@ -297,20 +299,20 @@ async def test_import_from_firefox_lands_in_the_table(tmp_path: Path) -> None:
 
     report = await run_import(
         database_path=tmp_path / "db.sqlite",
-        input=FirefoxImport(home=home, platform="linux", env={}, machine="test-laptop"),
+        input=FirefoxImport(host=host(home), machine="test-laptop"),
     )
 
     assert report.input == "firefox"
     assert report.visits_inserted == 1
     assert report.machine == "test-laptop"
     assert report.profile == "default-release"
-    assert report.source is None
+    assert report.portable_path is None
     assert report.exported_at is None
     assert report.records_inserted == 0
     assert report.cursors_advanced == 0
     payload = json.loads(report.to_json())
     assert payload["input"] == "firefox"
-    assert payload["source"] is None
+    assert payload["portable_path"] is None
     assert payload["exported_at"] is None
     store = await open_database(tmp_path / "db.sqlite")
     stored = await store.load_firefox_visits()
@@ -323,7 +325,7 @@ async def test_import_from_firefox_is_idempotent(tmp_path: Path) -> None:
     home = tmp_path / "home"
     profile_with_firefox(home, [("https://a.example/", "A", micros(DAY), 1)])
     database = tmp_path / "db.sqlite"
-    source = FirefoxImport(home=home, platform="linux", env={}, machine="test-laptop")
+    source = FirefoxImport(host=host(home), machine="test-laptop")
 
     first = await run_import(database_path=database, input=source)
     second = await run_import(database_path=database, input=source)
@@ -343,9 +345,7 @@ async def test_import_from_firefox_takes_an_explicit_profile(tmp_path: Path) -> 
     report = await run_import(
         database_path=tmp_path / "db.sqlite",
         input=FirefoxImport(
-            home=tmp_path / "home",
-            platform="linux",
-            env={},
+            host=host(tmp_path / "home"),
             machine="test-laptop",
             profile_path=profile,
         ),
@@ -373,7 +373,7 @@ async def test_import_from_firefox_keeps_visits_that_live_in_the_wal(tmp_path: P
     try:
         report = await run_import(
             database_path=tmp_path / "db.sqlite",
-            input=FirefoxImport(home=home, platform="linux", env={}, machine="test-laptop"),
+            input=FirefoxImport(host=host(home), machine="test-laptop"),
         )
     finally:
         connection.close()
@@ -396,7 +396,7 @@ async def test_import_from_firefox_leaves_cloud_records_and_cursors_alone(tmp_pa
 
     report = await run_import(
         database_path=database,
-        input=FirefoxImport(home=home, platform="linux", env={}, machine="test-laptop"),
+        input=FirefoxImport(host=host(home), machine="test-laptop"),
     )
 
     assert report.records_inserted == 0
@@ -439,9 +439,7 @@ def test_blocking_wrappers_are_usable_from_sync_code(tmp_path: Path) -> None:
     exported = export_blocking(
         database_path=home / "ffinfo.sqlite",
         destination=tmp_path / "portable.sqlite",
-        home=home,
-        platform="linux",
-        env={},
+        host=host(home),
         machine="test-laptop",
     )
     imported = import_blocking(

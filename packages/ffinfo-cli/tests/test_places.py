@@ -12,10 +12,14 @@ from pathlib import Path
 import pytest
 
 from ffinfo.errors import ConfigurationError
-from ffinfo_cli.places import discover_profiles, find_profile
+from ffinfo_cli.places import HostContext, discover_profiles, find_profile
 
 LINUX_ROOT = Path(".mozilla/firefox")
 MACOS_ROOT = Path("Library/Application Support/Firefox")
+
+
+def host(home: Path, platform: str = "linux", env: dict[str, str] | None = None) -> HostContext:
+    return HostContext(home=home, platform=platform, env=env if env is not None else {})
 
 
 def make_profile(root: Path, name: str, *, with_db: bool = True) -> Path:
@@ -50,7 +54,7 @@ Default=1
 """,
     )
 
-    found = discover_profiles(home=tmp_path, platform="linux", env={})
+    found = discover_profiles(host=host(tmp_path))
 
     assert names(found) == ["default-release"]
     assert found[0].path == root / "abc123.default-release"
@@ -71,7 +75,7 @@ Default=1
 """,
     )
 
-    found = discover_profiles(home=tmp_path, platform="darwin", env={})
+    found = discover_profiles(host=host(tmp_path, "darwin"))
 
     assert names(found) == ["mac"]
     assert found[0].path == root / "mac.default"
@@ -97,9 +101,7 @@ Path={name}
         )
 
     found = discover_profiles(
-        home=tmp_path,
-        platform="win32",
-        env={"APPDATA": str(roaming), "LOCALAPPDATA": str(local)},
+        host=host(tmp_path, "win32", {"APPDATA": str(roaming), "LOCALAPPDATA": str(local)})
     )
 
     assert sorted(names(found)) == ["local.default", "roaming.default"]
@@ -125,7 +127,7 @@ Default=1
 """,
         )
 
-    found = discover_profiles(home=tmp_path, platform="linux", env={})
+    found = discover_profiles(host=host(tmp_path))
 
     assert len(found) == 3
     assert {profile.path.parent for profile in found} == {
@@ -159,7 +161,7 @@ Default=1
 """,
     )
 
-    found = discover_profiles(home=tmp_path, platform="linux", env={})
+    found = discover_profiles(host=host(tmp_path))
 
     assert names(found) == ["real"]
 
@@ -179,7 +181,7 @@ Default=1
 """,
     )
 
-    found = discover_profiles(home=tmp_path, platform="linux", env={})
+    found = discover_profiles(host=host(tmp_path))
 
     assert [profile.path for profile in found] == [elsewhere]
 
@@ -201,7 +203,7 @@ Path=chosen.default
 """,
     )
 
-    found = discover_profiles(home=tmp_path, platform="linux", env={})
+    found = discover_profiles(host=host(tmp_path))
 
     assert found[0].is_default is True
 
@@ -211,7 +213,7 @@ def test_missing_ini_falls_back_to_scanning(tmp_path: Path) -> None:
     root = tmp_path / LINUX_ROOT
     make_profile(root, "stray.default")
 
-    found = discover_profiles(home=tmp_path, platform="linux", env={})
+    found = discover_profiles(host=host(tmp_path))
 
     assert names(found) == ["stray.default"]
 
@@ -231,7 +233,7 @@ Default=1
 """,
     )
 
-    found = discover_profiles(home=tmp_path, platform="linux", env={})
+    found = discover_profiles(host=host(tmp_path))
 
     assert len(found) == 1
 
@@ -256,7 +258,7 @@ Default=1
 """,
     )
 
-    found = discover_profiles(home=tmp_path, platform="linux", env={})
+    found = discover_profiles(host=host(tmp_path))
 
     assert names(found)[0] == "zzz"
 
@@ -281,7 +283,7 @@ Default=1
 """,
     )
 
-    chosen = find_profile(home=tmp_path, platform="linux", env={})
+    chosen = find_profile(host=host(tmp_path))
 
     assert chosen.name == "zzz"
 
@@ -290,7 +292,7 @@ def test_find_profile_takes_explicit_path(tmp_path: Path) -> None:
     """``--profile`` 指哪打哪 —— 哪怕它不在任何标准位置。"""
     profile = make_profile(tmp_path / "hand-made", "anywhere.default")
 
-    chosen = find_profile(home=tmp_path, platform="linux", env={}, explicit=profile)
+    chosen = find_profile(host=host(tmp_path), explicit=profile)
 
     assert chosen.path == profile
     assert chosen.is_default is True
@@ -300,7 +302,7 @@ def test_find_profile_rejects_explicit_path_without_database(tmp_path: Path) -> 
     empty = tmp_path / "hand-made"
 
     with pytest.raises(ConfigurationError) as caught:
-        find_profile(home=tmp_path, platform="linux", env={}, explicit=empty)
+        find_profile(host=host(tmp_path), explicit=empty)
 
     message = str(caught.value)
     assert "places.sqlite" in message
@@ -310,7 +312,7 @@ def test_find_profile_rejects_explicit_path_without_database(tmp_path: Path) -> 
 def test_find_profile_error_is_actionable(tmp_path: Path) -> None:
     """找不到 Firefox 时**不能**抛裸的 FileNotFoundError —— 得说清下一步干什么。"""
     with pytest.raises(ConfigurationError) as caught:
-        find_profile(home=tmp_path, platform="linux", env={})
+        find_profile(host=host(tmp_path))
 
     message = str(caught.value)
     assert "--profile" in message

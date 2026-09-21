@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,7 +27,7 @@ from typing import ClassVar, Literal
 from pydantic import BaseModel, ConfigDict
 
 from ffinfo_cli import __version__
-from ffinfo_cli.places import FirefoxVisit, read_firefox_visits
+from ffinfo_cli.places import FirefoxVisit, HostContext, read_firefox_visits
 from ffinfo_cli.portable import (
     ExportSource,
     PortableCursor,
@@ -70,9 +70,8 @@ class PortableImport:
 class FirefoxImport:
     """``import --from-firefox`` —— 直接读本机的 ``places.sqlite``。"""
 
-    home: Path
-    platform: str
-    env: Mapping[str, str]
+    host: HostContext
+    """这台机器的运行环境（``home`` / ``platform`` / ``env``），由 CLI 注入。"""
     machine: str
     """源机器名。CLI 传主机名 —— 与 ``export`` 同源，同机的同一次访问才对得上。"""
     profile_path: Path | None = None
@@ -118,11 +117,11 @@ class ImportReport(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
 
     format_version: int = 2
-    """**2**：加了 ``input``；``source`` / ``exported_at`` 对 firefox 输入为 null。
+    """**2**：加了 ``input``；``portable_path`` / ``exported_at`` 对 firefox 输入为 null。
     **1**：只有便携文件这一种输入。"""
     input: ImportInputKind
     """这次用的是哪种输入：``portable``（便携文件）· ``firefox``（本机 places.sqlite）。"""
-    source: str | None = None
+    portable_path: str | None = None
     """便携文件的路径。``input`` 是 ``firefox`` 时为 null —— 那条路径没有文件。"""
     machine: str
     """数据的源机器名 —— 合并两个源时靠它区分。firefox 输入取主机名。"""
@@ -150,9 +149,7 @@ async def run_export(
     *,
     database_path: Path,
     destination: Path,
-    home: Path,
-    platform: str,
-    env: Mapping[str, str],
+    host: HostContext,
     machine: str,
     profile_path: Path | None = None,
     clock: Callable[[], float] = time.time,
@@ -163,9 +160,7 @@ async def run_export(
     库还不存在（没 login 过）也照样能 export，那就只有 firefox 那部分。
     """
     started = clock()
-    collected = read_firefox_visits(
-        home=home, platform=platform, env=env, profile_path=profile_path
-    )
+    collected = read_firefox_visits(host=host, profile_path=profile_path)
     records, cursors = await _cloud_state(database_path)
     meta = write_portable(
         destination,
@@ -226,7 +221,7 @@ async def run_import(
         advanced = await store.merge_sync_cursors(portable.cursors)
         return ImportReport(
             input="portable",
-            source=str(input.path),
+            portable_path=str(input.path),
             machine=portable.meta.machine,
             profile=portable.meta.profile,
             exported_at=portable.meta.exported_at,
@@ -240,12 +235,7 @@ async def run_import(
             elapsed_seconds=clock() - started,
         )
 
-    collected = read_firefox_visits(
-        home=input.home,
-        platform=input.platform,
-        env=input.env,
-        profile_path=input.profile_path,
-    )
+    collected = read_firefox_visits(host=input.host, profile_path=input.profile_path)
     store = await open_database(database_path, warn=warn)
     visits = await _store_visits(store, input.machine, collected.visits)
     return ImportReport(
@@ -297,9 +287,7 @@ def export_blocking(
     *,
     database_path: Path,
     destination: Path,
-    home: Path,
-    platform: str,
-    env: Mapping[str, str],
+    host: HostContext,
     machine: str,
     profile_path: Path | None = None,
 ) -> ExportReport:
@@ -308,9 +296,7 @@ def export_blocking(
         run_export(
             database_path=database_path,
             destination=destination,
-            home=home,
-            platform=platform,
-            env=env,
+            host=host,
             machine=machine,
             profile_path=profile_path,
         )

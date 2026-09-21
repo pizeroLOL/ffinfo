@@ -4,9 +4,9 @@
 ``places.sqlite``。三平台路径不同，而且**不能猜目录名**（形如 ``<8位随机>.default-release``）——
 所以走 Firefox 自己的 ``profiles.ini``，认它标的那个 ``Default=1``。
 
-**``home`` / ``platform`` / ``env`` 一律是参数**，函数自己不读 ``Path.home()`` 和
-``sys.platform``：这样在 Linux 上也能把 macOS / Windows 的分支测出来
-（见 ``tests/test_places.py``），而不是靠"相信另一条分支是对的"。
+**``home`` / ``platform`` / ``env`` 一律由调用者注入**（打包成 :class:`HostContext`），
+函数自己不读 ``Path.home()`` 和 ``sys.platform``：这样在 Linux 上也能把 macOS / Windows 的
+分支测出来（见 ``tests/test_places.py``），而不是靠"相信另一条分支是对的"。
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ __all__ = [
     "PLACES_FILENAME",
     "FirefoxVisit",
     "FirefoxVisits",
+    "HostContext",
     "Profile",
     "Snapshot",
     "discover_profiles",
@@ -76,7 +77,21 @@ class Profile:
     """Firefox 自己标的默认 profile。"""
 
 
-def firefox_roots(*, home: Path, platform: str, env: Mapping[str, str]) -> tuple[Path, ...]:
+@dataclass(frozen=True, slots=True)
+class HostContext:
+    """这台机器的运行环境 —— ``home`` / ``platform`` / ``env`` 三件套，只为打包传递。
+
+    仍然**一律由调用者注入**（见 ``docs/design.md`` §2.5）：库不读 ``Path.home()``、
+    也不读 ``sys.platform``；打包只是让这一组参数在 ``places`` / ``profiles`` / ``transfer``
+    与 CLI 之间传递时不必逐个拆开。**字段不给任何默认值** —— 默认路径只在 CLI 层决定。
+    """
+
+    home: Path
+    platform: str
+    env: Mapping[str, str]
+
+
+def firefox_roots(*, host: HostContext) -> tuple[Path, ...]:
     """这台机器上**可能**放着 Firefox 配置的根目录。
 
     **不检查存在性** —— 找不到 profile 时要能把"我找过哪些地方"原样报给用户，
@@ -85,29 +100,29 @@ def firefox_roots(*, home: Path, platform: str, env: Mapping[str, str]) -> tuple
     Linux 有四种落脚点：发行版包、``firefox-esr``、Snap、Flatpak。少一个就是
     "明明装了 Firefox 却说找不到"。
     """
-    if platform.startswith("win"):
+    if host.platform.startswith("win"):
         return tuple(
-            Path(env[var]) / "Mozilla" / "Firefox"
+            Path(host.env[var]) / "Mozilla" / "Firefox"
             for var in ("APPDATA", "LOCALAPPDATA")
-            if env.get(var)
+            if host.env.get(var)
         )
-    if platform == "darwin":
-        return (home / "Library" / "Application Support" / "Firefox",)
+    if host.platform == "darwin":
+        return (host.home / "Library" / "Application Support" / "Firefox",)
     return (
-        home / ".mozilla" / "firefox",
-        home / ".mozilla" / "firefox-esr",
-        home / "snap" / "firefox" / "common" / ".mozilla" / "firefox",
-        home / ".var" / "app" / "org.mozilla.firefox" / ".mozilla" / "firefox",
+        host.home / ".mozilla" / "firefox",
+        host.home / ".mozilla" / "firefox-esr",
+        host.home / "snap" / "firefox" / "common" / ".mozilla" / "firefox",
+        host.home / ".var" / "app" / "org.mozilla.firefox" / ".mozilla" / "firefox",
     )
 
 
-def discover_profiles(*, home: Path, platform: str, env: Mapping[str, str]) -> tuple[Profile, ...]:
+def discover_profiles(*, host: HostContext) -> tuple[Profile, ...]:
     """找出所有**真的有** ``places.sqlite`` 的 profile，默认那个排在最前。
 
     同一个 profile 可能被 ini 和兜底扫描各撞见一次，按真实路径去重。
     """
     found: dict[Path, Profile] = {}
-    for root in firefox_roots(home=home, platform=platform, env=env):
+    for root in firefox_roots(host=host):
         if not root.is_dir():
             continue
         for profile in (*_profiles_from_ini(root), *_scan(root)):
@@ -118,13 +133,7 @@ def discover_profiles(*, home: Path, platform: str, env: Mapping[str, str]) -> t
     return tuple(sorted(found.values(), key=lambda profile: (not profile.is_default, profile.name)))
 
 
-def find_profile(
-    *,
-    home: Path,
-    platform: str,
-    env: Mapping[str, str],
-    explicit: Path | None = None,
-) -> Profile:
+def find_profile(*, host: HostContext, explicit: Path | None = None) -> Profile:
     """挑一个 profile 来读：``explicit`` 优先，否则用 Firefox 标的默认那个。
 
     两种情况都给**能照做**的错误，不抛裸的 ``FileNotFoundError``。
@@ -139,11 +148,11 @@ def find_profile(
             raise ConfigurationError(msg)
         return Profile(name=path.name, path=path, is_default=True)
 
-    found = discover_profiles(home=home, platform=platform, env=env)
+    found = discover_profiles(host=host)
     if found:
         return found[0]
 
-    searched = "、".join(str(root) for root in firefox_roots(home=home, platform=platform, env=env))
+    searched = "、".join(str(root) for root in firefox_roots(host=host))
     msg = (
         f"没找到任何 Firefox profile（找过：{searched}）。"
         f"要么这台机器上没装过 Firefox，要么 profile 不在默认位置 —— "
@@ -272,9 +281,7 @@ def read_visits(database: Path, *, since: datetime | None = None) -> tuple[Firef
 
 def read_firefox_visits(
     *,
-    home: Path,
-    platform: str,
-    env: Mapping[str, str],
+    host: HostContext,
     profile_path: Path | None = None,
 ) -> FirefoxVisits:
     """找 profile → 快照（含 WAL 折叠与自检）→ 读出访问。**快照是临时的**，返回前已清理。
@@ -282,7 +289,7 @@ def read_firefox_visits(
     **这条路径只准有一份实现。** 只拷主文件不会报错、只会静默少掉 ``-wal`` 里的最近访问
     （见 :func:`snapshot_places`）—— ``export`` 与 firefox 直连导入都走它，谁也不另写一份。
     """
-    profile = find_profile(home=home, platform=platform, env=env, explicit=profile_path)
+    profile = find_profile(host=host, explicit=profile_path)
     with TemporaryDirectory(prefix="ffinfo-snapshot-") as workdir:
         snapshot = snapshot_places(profile.path / PLACES_FILENAME, into=Path(workdir))
         visits = read_visits(snapshot.database)

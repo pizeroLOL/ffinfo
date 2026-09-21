@@ -29,6 +29,7 @@ from ffinfo_cli import __version__
 from ffinfo_cli.list import DATA_TYPES, list_blocking, parse_since
 from ffinfo_cli.login import login_sync
 from ffinfo_cli.paths import credentials_path, database_path, identity_path
+from ffinfo_cli.places import HostContext
 from ffinfo_cli.profiles import profiles_blocking
 from ffinfo_cli.progress import reporter_for
 from ffinfo_cli.sync import SYNCABLE_COLLECTIONS, sync_blocking
@@ -275,9 +276,7 @@ def export(
         lambda: export_blocking(
             database_path=database_path(),
             destination=destination,
-            home=Path.home(),
-            platform=sys.platform,
-            env=os.environ,
+            host=HostContext(home=Path.home(), platform=sys.platform, env=os.environ),
             machine=socket.gethostname(),
             profile_path=profile,
         )
@@ -305,9 +304,7 @@ def import_command(
         if source is not None:
             _fail_usage("两种输入只能给一种：<便携文件> 或 --from-firefox")
         import_input = FirefoxImport(
-            home=Path.home(),
-            platform=sys.platform,
-            env=os.environ,
+            host=HostContext(home=Path.home(), platform=sys.platform, env=os.environ),
             machine=socket.gethostname(),
             profile_path=profile,
         )
@@ -332,7 +329,7 @@ def profiles() -> None:
     """查看本地状态：探测到的 Firefox profile、目录、密钥、上次同步时间。"""
     report = _guard(
         lambda: profiles_blocking(
-            home=Path.home(), platform=sys.platform, env=os.environ, warn=_warn
+            host=HostContext(home=Path.home(), platform=sys.platform, env=os.environ), warn=_warn
         )
     )
 

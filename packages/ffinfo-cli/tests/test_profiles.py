@@ -12,11 +12,16 @@ import pytest
 from typer.testing import CliRunner
 
 from ffinfo_cli.cli import app
+from ffinfo_cli.places import HostContext
 from ffinfo_cli.profiles import LocalPaths, build_report
 from ffinfo_cli.store import open_database
 from support import build_places
 
 NOW = 1_789_320_612.0
+
+
+def host(home: Path, platform: str = "linux", env: dict[str, str] | None = None) -> HostContext:
+    return HostContext(home=home, platform=platform, env=env if env is not None else {})
 
 
 def paths_for(tmp_path: Path) -> LocalPaths:
@@ -43,9 +48,7 @@ async def test_reports_the_profiles_it_found(tmp_path: Path) -> None:
     home = tmp_path / "home"
     profile = make_profile(home)
 
-    report = await build_report(
-        home=home, platform="linux", env={}, paths=paths_for(tmp_path), clock=lambda: NOW
-    )
+    report = await build_report(host=host(home), paths=paths_for(tmp_path), clock=lambda: NOW)
 
     assert [item.path for item in report.profiles] == [str(profile)]
     assert report.profiles[0].name == "abcd1234.default-release"
@@ -54,9 +57,7 @@ async def test_reports_the_profiles_it_found(tmp_path: Path) -> None:
 async def test_missing_firefox_says_where_it_looked(tmp_path: Path) -> None:
     """找不到 profile 不是错误 —— 把找过的地方列出来，并说明 firefox 数据怎么来。"""
     report = await build_report(
-        home=tmp_path / "home",
-        platform="linux",
-        env={},
+        host=host(tmp_path / "home"),
         paths=paths_for(tmp_path),
         clock=lambda: NOW,
     )
@@ -69,9 +70,7 @@ async def test_missing_firefox_says_where_it_looked(tmp_path: Path) -> None:
 
 async def test_reports_credentials_and_database_state(tmp_path: Path) -> None:
     report = await build_report(
-        home=tmp_path / "home",
-        platform="linux",
-        env={},
+        host=host(tmp_path / "home"),
         paths=paths_for(tmp_path),
         clock=lambda: NOW,
     )
@@ -91,9 +90,7 @@ async def test_collections_come_from_the_cursors(tmp_path: Path) -> None:
     await store.save_cursor("history", last_modified=1_789_320_600.12, synced_at=NOW, records=4_921)
 
     report = await build_report(
-        home=tmp_path / "home",
-        platform="linux",
-        env={},
+        host=host(tmp_path / "home"),
         paths=paths,
         clock=lambda: NOW,
     )
@@ -106,9 +103,7 @@ async def test_collections_come_from_the_cursors(tmp_path: Path) -> None:
 
 async def test_json_is_serializable(tmp_path: Path) -> None:
     report = await build_report(
-        home=tmp_path / "home",
-        platform="linux",
-        env={},
+        host=host(tmp_path / "home"),
         paths=paths_for(tmp_path),
         clock=lambda: NOW,
     )

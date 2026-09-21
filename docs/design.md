@@ -384,6 +384,15 @@ firefox 源是空的（目标机器没导入过）就自然降级成单源。
 | 4 | **Mozilla 无第三方 CLI 自助注册通道** | 项目无法"干净地"发布 | 同上，先本地自用 |
 | 5 | **access token 过期后只能人工重跑 `login`** | 与"无人值守"矛盾 —— 过期那一刻起，`sync` 只能报"重新登录" | ✅ **已解决**：过期时 `sync` 先用 `refresh_token` 自动续（RFC 6749 §6，见 §3.3）；refresh token 也失效（`invalid_grant`）才提示重新 `login` |
 
+### 已知取舍
+
+不是风险，是**明知可以改、现在故意不改**的地方。每条都记下"何时该动"，免得后来者（或未来的自己）
+把"没写"误当成"没想到"。
+
+| # | 取舍 | 是什么 | 为何不做 | 何时该做 |
+|---|---|---|---|---|
+| Q2 | `run_import` 两分支各建一份 `ImportReport` | 便携路与 firefox 路各构造一份报告，共享约 4 行（`open_database` / `_store_visits` / `visits_skipped` / `elapsed`） | 分叉是本质的：便携路还带云端记录与游标，firefox 路没有。抽 helper 会退化成十来个参数、一半对某条分支恒空的开关（Repeated Switches / Speculative Generality） | 出现第三种 import 输入时（Rule of Three） |
+
 ---
 
 ## 5. TODO（明确推迟，不在首版范围）

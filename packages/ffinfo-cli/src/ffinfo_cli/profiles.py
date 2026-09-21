@@ -15,7 +15,7 @@ import asyncio
 import json
 import sqlite3
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,7 +24,7 @@ from typing import ClassVar
 from pydantic import BaseModel, ConfigDict
 
 from ffinfo_cli.paths import config_dir, credentials_path, data_dir, database_path, identity_path
-from ffinfo_cli.places import discover_profiles, firefox_roots
+from ffinfo_cli.places import HostContext, discover_profiles, firefox_roots
 from ffinfo_cli.store import open_database
 
 __all__ = ["LocalPaths", "ProfilesReport", "build_report", "default_paths", "profiles_blocking"]
@@ -112,22 +112,17 @@ class ProfilesReport(BaseModel):
 
 async def build_report(
     *,
-    home: Path,
-    platform: str,
-    env: Mapping[str, str],
+    host: HostContext,
     paths: LocalPaths,
     warn: Callable[[str], None] | None = None,
     clock: Callable[[], float] = time.time,
 ) -> ProfilesReport:
     """把本地状态凑成一份报告。
 
-    ``home`` / ``platform`` / ``env`` 由调用者注入 —— 测试才塞得进假环境。
+    ``host`` 由调用者注入 —— 测试才塞得进假环境。
     """
-    found = discover_profiles(home=home, platform=platform, env=env)
-    roots = [
-        FileInfo(path=str(root), exists=root.is_dir())
-        for root in firefox_roots(home=home, platform=platform, env=env)
-    ]
+    found = discover_profiles(host=host)
+    roots = [FileInfo(path=str(root), exists=root.is_dir()) for root in firefox_roots(host=host)]
 
     collections: list[CollectionProgress] = []
     db_note: str | None = None
@@ -148,8 +143,8 @@ async def build_report(
 
     return ProfilesReport(
         generated_at=datetime.fromtimestamp(clock(), tz=UTC).isoformat(),
-        platform=platform,
-        home=str(home),
+        platform=host.platform,
+        home=str(host.home),
         profiles=[
             ProfileInfo(name=profile.name, path=str(profile.path), is_default=profile.is_default)
             for profile in found
@@ -195,9 +190,7 @@ def _notes(
 
 def profiles_blocking(
     *,
-    home: Path,
-    platform: str,
-    env: Mapping[str, str],
+    host: HostContext,
     paths: LocalPaths | None = None,
     warn: Callable[[str], None] | None = None,
     clock: Callable[[], float] = time.time,
@@ -205,9 +198,7 @@ def profiles_blocking(
     """:func:`build_report` 的同步外壳。"""
     return asyncio.run(
         build_report(
-            home=home,
-            platform=platform,
-            env=env,
+            host=host,
             paths=paths if paths is not None else default_paths(),
             warn=warn,
             clock=clock,
