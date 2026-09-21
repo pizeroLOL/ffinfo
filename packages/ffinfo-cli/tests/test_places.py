@@ -262,6 +262,39 @@ Default=1
     assert chosen.is_default is True
 
 
+def test_install_default_pointing_at_missing_profile_falls_back(tmp_path: Path) -> None:
+    """Install 段指向的 profile 连 ``places.sqlite`` 都没有 —— 退回 Profile 段的 Default=1。
+
+    否则默认簇全空，又轮到名字序来挑（正是本票要消除的失效模式）。
+    """
+    root = tmp_path / LINUX_ROOT
+    make_profile(root, "aaa.default")
+    make_profile(root, "zzz.default-release")
+    write_ini(
+        root,
+        """
+[Install4F96D1932A9F858E]
+Default=ghost.default
+
+[Profile0]
+Name=default
+IsRelative=1
+Path=aaa.default
+
+[Profile1]
+Name=default-release
+IsRelative=1
+Path=zzz.default-release
+Default=1
+""",
+    )
+
+    chosen = find_profile(host=host(tmp_path))
+
+    assert chosen.name == "default-release"
+    assert chosen.is_default is True
+
+
 def test_missing_ini_falls_back_to_scanning(tmp_path: Path) -> None:
     """``profiles.ini`` 没了（或没见过）也得能找到 —— 直接扫 places.sqlite。"""
     root = tmp_path / LINUX_ROOT

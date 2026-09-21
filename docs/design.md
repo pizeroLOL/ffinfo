@@ -294,8 +294,9 @@ struct HistoryRecord {
 ### 3.8 firefox 源：places.sqlite 与 export/import（08 号，2026-09-14）
 
 **profile 定位不猜目录名**（形如 `<8位随机>.default-release`），走 Firefox 自己的
-`profiles.ini`。默认是哪个：**`[InstallXXXX] Default` 优先**，Profile 段的 `Default=1`
-只在没有 Install 段时才作数。老 `default` profile 升级后往往不清掉 `Default=1` —— 若与
+`profiles.ini`。默认是哪个：**`[InstallXXXX] Default` 命中某个 profile 时优先**，
+Profile 段的 `Default=1` 只在 Install 段没命中时作数（没有 Install 段，或它指向的 profile
+连 `places.sqlite` 都没有）。老 `default` profile 升级后往往不清掉 `Default=1` —— 若与
 Install 段平权，两者会并列成默认，再按名字排序就把旧 profile 挑出来（`default` <
 `default-release`），`import --from-firefox` 静默导入 0 条。三平台根目录：
 

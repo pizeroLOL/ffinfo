@@ -563,6 +563,24 @@ async def test_cloud_records_without_credentials_still_fail(tmp_path: Path) -> N
         )
 
 
+async def test_empty_database_without_credentials_is_an_empty_report(tmp_path: Path) -> None:
+    """空库 + 从没登录：history 返回空报告，不报配置错误。
+
+    没有云端记录就没有密文要解 —— 凭据不该挡路；"从没登录"靠 ``synced_at: null`` 表达。
+    """
+    report = await run_list(
+        identity_path=tmp_path / "no-such-age-key.txt",
+        credentials_path=tmp_path / "no-such-credentials.age",
+        database_path=tmp_path / "db.sqlite",
+        clock=lambda: NOW,
+    )
+
+    assert report.items == []
+    assert report.records == 0
+    assert report.sources == []
+    assert report.synced_at is None
+
+
 async def test_sync_source_alone_still_works(tmp_path: Path) -> None:
     """**降级到单源**：一台没导入过任何 firefox 数据的机器，查询照常。"""
     await build_db(tmp_path, [history_record("rec", url="https://cloud.test/")])

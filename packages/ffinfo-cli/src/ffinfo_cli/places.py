@@ -16,7 +16,7 @@ import shutil
 import sqlite3
 from collections.abc import Mapping
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -336,8 +336,8 @@ def _profiles_from_ini(root: Path) -> list[Profile]:
         return []
 
     # 新版 Firefox 把"默认是哪个"记在 [InstallXXXX] 段里，而不是 Profile 段。
-    # 它一旦存在就是"当前默认" —— Profile 段残留的 Default=1（老的 default profile
-    # 升级后没清掉）不该与它并列，否则并列时只能按名字排序、把旧 profile 挑出来。
+    # 它**命中某个 profile** 时就是"当前默认" —— Profile 段残留的 Default=1（老的 default
+    # profile 升级后没清掉）不该与它并列，否则并列时只能按名字排序、把旧 profile 挑出来。
     install_defaults = {
         value
         for section in parser.sections()
@@ -346,6 +346,8 @@ def _profiles_from_ini(root: Path) -> list[Profile]:
     }
 
     profiles: list[Profile] = []
+    install_hit = False
+    profile_flags: dict[Path, bool] = {}
     for section in parser.sections():
         if not section.startswith("Profile"):
             continue
@@ -356,16 +358,24 @@ def _profiles_from_ini(root: Path) -> list[Profile]:
         path = (root / raw_path) if relative else Path(raw_path)
         if not (path / PLACES_FILENAME).is_file():
             continue
-        is_default = (
-            raw_path in install_defaults if install_defaults else _flag(parser, section, "Default")
-        )
+        hit = raw_path in install_defaults
+        install_hit = install_hit or hit
+        profile_flags[path] = _flag(parser, section, "Default")
         profiles.append(
             Profile(
                 name=_text(parser, section, "Name") or section,
                 path=path,
-                is_default=is_default,
+                is_default=hit,
             )
         )
+
+    if not install_hit:
+        # Install 段没命中任何**留下来的** profile（没写 Default，或它指向的 profile
+        # 连 places.sqlite 都没有）—— 退回 Profile 段的 Default=1。否则默认簇全空，
+        # discover_profiles 只能按名字排序，又把旧 profile 挑出来。
+        profiles = [
+            replace(profile, is_default=profile_flags[profile.path]) for profile in profiles
+        ]
     return profiles
 
 
