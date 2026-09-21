@@ -31,6 +31,7 @@ from ffinfo_cli.failures import error_payload
 from ffinfo_cli.list.bookmarks import BookmarksReport
 from ffinfo_cli.list.tabs import TabsReport
 from ffinfo_cli.sync import CollectedSync, SyncReport
+from support import host
 
 runner = CliRunner()
 
@@ -296,6 +297,49 @@ def test_completion_script_is_available() -> None:
 
     assert result.exit_code == 0
     assert result.stdout.strip()
+
+
+def shell_completions(*args: str, incomplete: str) -> set[str]:
+    """敲到 ``args`` 之后、正在补 ``incomplete`` 时 shell 会给出的候选。
+
+    走 click 的 bash 补全协议：``COMP_WORDS`` 把正在补的那个词也算进去，
+    ``COMP_CWORD`` 指到它上面。
+    """
+    words = ["ffinfo-cli", *args, incomplete]
+    result = runner.invoke(
+        app,
+        [],
+        env={
+            "_FFINFO_CLI_COMPLETE": "complete_bash",
+            "COMP_WORDS": " ".join(words),
+            "COMP_CWORD": str(len(words) - 1),
+        },
+    )
+    assert result.exit_code == 0, result.stderr
+    return set(result.stdout.split())
+
+
+def test_shell_completion_offers_subcommands_and_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """静态补全照常：``list`` 的子命令、``tabs`` 的选项名都出 —— 与数据感知补全并存。"""
+    for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME"):
+        monkeypatch.setenv(name, str(tmp_path / name))
+
+    assert {"history", "bookmarks", "tabs"} <= shell_completions("list", incomplete="")
+    assert {"--device", "--limit"} <= shell_completions("list", "tabs", incomplete="--")
+
+
+def test_shell_completion_of_option_values_is_silent_without_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--device <TAB>`` 在没有库时给空候选、退出 0、不污染 stderr。"""
+    for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME"):
+        monkeypatch.setenv(name, str(tmp_path / name))
+    monkeypatch.setattr("ffinfo_cli.commands.transfer._host", lambda: host(tmp_path))
+
+    assert shell_completions("list", "tabs", "--device", incomplete="") == set()
+    assert shell_completions("import", "--profile", incomplete="") == set()
 
 
 def _fake_sync(*, on_progress: object = None, **_kwargs: object) -> SyncReport:

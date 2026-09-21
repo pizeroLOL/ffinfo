@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from collections.abc import Awaitable, Callable
@@ -23,6 +24,7 @@ from ffinfo.keys import OLD_SYNC_SCOPE, ScopedKey
 from ffinfo.oauth import Credentials
 from ffinfo.storage import EncryptedBso
 from ffinfo_cli import list as list_module
+from ffinfo_cli.commands import list as list_command
 from ffinfo_cli.list import (
     BookmarksReport,
     HistoryReport,
@@ -1260,3 +1262,153 @@ def test_model_fields_and_notes_defaults() -> None:
         assert report.skipped_details == []
         assert report.sources == []
         assert report.firefox_records == 0
+
+
+# --- 数据感知补全：回调给定 incomplete 返回候选，读不到就静默空列表 ---
+
+
+def point_completion_at(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database: Path,
+    identity: Path,
+    credentials: Path,
+) -> None:
+    """把 ``commands.list`` 的补全回调指向这个测试的库与凭据。"""
+    monkeypatch.setattr("ffinfo_cli.commands.list.database_path", lambda: database)
+    monkeypatch.setattr("ffinfo_cli.commands.list.identity_path", lambda: identity)
+    monkeypatch.setattr("ffinfo_cli.commands.list.credentials_path", lambda: credentials)
+
+
+def broken_record(record_id: str) -> EncryptedBso:
+    """一条解不开的记录 —— 用来验"坏记录不连坐、整体静默"。"""
+    return EncryptedBso(
+        id=record_id,
+        modified=2.0,
+        payload=json.dumps({"IV": "AAAA", "hmac": "00" * 32, "ciphertext": "AAAA"}),
+    )
+
+
+def test_device_completion_lists_names_and_client_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``list tabs --device <TAB>``：库里的设备名与 ``clientId`` 都出。"""
+    asyncio.run(
+        build_db(
+            tmp_path,
+            [],
+            tabs=[
+                tabs_record("dev1", client_name="alpha"),
+                tabs_record("dev2", client_name="beta"),
+            ],
+        )
+    )
+    identity, credentials = write_credentials(tmp_path)
+    point_completion_at(
+        monkeypatch,
+        database=tmp_path / "db.sqlite",
+        identity=identity,
+        credentials=credentials,
+    )
+
+    assert list_command.complete_device("") == ["alpha", "beta", "dev1", "dev2"]
+    assert list_command.complete_device("bet") == ["beta"]
+
+
+def test_bookmark_path_completion_lists_folder_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``list bookmarks --path <TAB>``：出**带祖先**的文件夹路径，不是裸标题。"""
+    asyncio.run(_build_nested_bookmarks(tmp_path))
+    identity, credentials = write_credentials(tmp_path)
+    point_completion_at(
+        monkeypatch,
+        database=tmp_path / "db.sqlite",
+        identity=identity,
+        credentials=credentials,
+    )
+
+    candidates = list_command.complete_bookmark_path("")
+
+    assert "书签工具栏" in candidates
+    assert "书签工具栏/工具" in candidates
+    assert "书签工具栏/工具/子" in candidates
+    assert "其他书签/工具" in candidates
+    assert "工具" not in candidates
+    assert list_command.complete_bookmark_path("书签工具栏/工") == [
+        "书签工具栏/工具",
+        "书签工具栏/工具/子",
+    ]
+
+
+def test_completion_without_database_is_silent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """库不存在 —— 空候选，不写 stderr。"""
+    identity, credentials = write_credentials(tmp_path)
+    point_completion_at(
+        monkeypatch,
+        database=tmp_path / "missing.sqlite",
+        identity=identity,
+        credentials=credentials,
+    )
+
+    assert list_command.complete_device("") == []
+    assert list_command.complete_bookmark_path("") == []
+    assert capsys.readouterr().err == ""
+
+
+def test_completion_without_credentials_is_silent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """库里有记录、却从没登录 —— 空候选，不写 stderr。"""
+    asyncio.run(build_db(tmp_path, [], tabs=[tabs_record("dev1", client_name="alpha")]))
+    point_completion_at(
+        monkeypatch,
+        database=tmp_path / "db.sqlite",
+        identity=tmp_path / "no-age-key.txt",
+        credentials=tmp_path / "no-credentials.age",
+    )
+
+    assert list_command.complete_device("") == []
+    assert capsys.readouterr().err == ""
+
+
+def test_completion_skips_broken_records_silently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """坏记录不连坐：好设备的候选照出，坏的那条只是不出现，且不写 stderr。"""
+    asyncio.run(
+        build_db(
+            tmp_path,
+            [],
+            tabs=[tabs_record("dev1", client_name="alpha"), broken_record("broken")],
+        )
+    )
+    identity, credentials = write_credentials(tmp_path)
+    point_completion_at(
+        monkeypatch,
+        database=tmp_path / "db.sqlite",
+        identity=identity,
+        credentials=credentials,
+    )
+
+    assert list_command.complete_device("") == ["alpha", "dev1"]
+    assert capsys.readouterr().err == ""
+
+
+def test_completion_with_only_broken_records_is_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """一条都解不开也静默 —— 空候选，不抛。"""
+    asyncio.run(build_db(tmp_path, [], tabs=[broken_record("broken")]))
+    identity, credentials = write_credentials(tmp_path)
+    point_completion_at(
+        monkeypatch,
+        database=tmp_path / "db.sqlite",
+        identity=identity,
+        credentials=credentials,
+    )
+
+    assert list_command.complete_device("") == []
+    assert capsys.readouterr().err == ""

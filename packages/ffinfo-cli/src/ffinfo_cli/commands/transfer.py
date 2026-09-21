@@ -12,7 +12,7 @@ import typer
 
 from ffinfo_cli.failures import fail_usage, guard, warn
 from ffinfo_cli.paths import database_path
-from ffinfo_cli.places import HostContext
+from ffinfo_cli.places import HostContext, discover_profiles
 from ffinfo_cli.render import render
 from ffinfo_cli.transfer import (
     FirefoxImport,
@@ -24,8 +24,30 @@ from ffinfo_cli.transfer import (
 
 _DESTINATION: Final = typer.Argument(..., help="便携文件写到哪（.sqlite）")
 _SOURCE: Final = typer.Argument(None, help="export 产出的那份便携文件（与 --from-firefox 二选一）")
+
+
+def _host() -> HostContext:
+    """本机 Firefox 探测用的环境 —— 默认路径只在 CLI 层决定；测试可替换。"""
+    return HostContext(home=Path.home(), platform=sys.platform, env=os.environ)
+
+
+def complete_profile(incomplete: str) -> list[str]:
+    """``--profile`` 的数据感知补全：探测到的 profile 目录。
+
+    **静默** —— 探测不到（或探测本身炸了）就给空候选，绝不写 stderr。
+    """
+    try:
+        candidates = [str(profile.path) for profile in discover_profiles(host=_host())]
+        return [path for path in dict.fromkeys(candidates) if path.startswith(incomplete)]
+    except Exception:
+        return []
+
+
 _PROFILE: Final = typer.Option(
-    None, "--profile", help="手动指定 Firefox profile 目录（自动找不到时用）"
+    None,
+    "--profile",
+    help="手动指定 Firefox profile 目录（自动找不到时用）",
+    autocompletion=complete_profile,
 )
 
 
@@ -42,7 +64,7 @@ def export(
         lambda: export_blocking(
             database_path=database_path(),
             destination=destination,
-            host=HostContext(home=Path.home(), platform=sys.platform, env=os.environ),
+            host=_host(),
             machine=socket.gethostname(),
             profile_path=profile,
         )
@@ -70,7 +92,7 @@ def import_command(
         if source is not None:
             fail_usage("两种输入只能给一种：<便携文件> 或 --from-firefox")
         import_input = FirefoxImport(
-            host=HostContext(home=Path.home(), platform=sys.platform, env=os.environ),
+            host=_host(),
             machine=socket.gethostname(),
             profile_path=profile,
         )

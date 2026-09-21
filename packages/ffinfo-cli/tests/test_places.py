@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 
 from ffinfo.errors import ConfigurationError
-from ffinfo_cli.places import discover_profiles, find_profile
+from ffinfo_cli.commands import transfer as transfer_command
+from ffinfo_cli.places import HostContext, discover_profiles, find_profile
 from support import host
 
 LINUX_ROOT = Path(".mozilla/firefox")
@@ -405,3 +406,36 @@ def test_find_profile_error_is_actionable(tmp_path: Path) -> None:
     assert "--profile" in message
     assert "Firefox" in message
     assert str(tmp_path / LINUX_ROOT) in message
+
+
+# --- ``--profile`` 补全：出探测到的 profile 目录，探测挂了也静默 ---
+
+
+def test_profile_completion_lists_discovered_profile_dirs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--profile <TAB>``：出探测到的 profile 目录，按 ``incomplete`` 过滤。"""
+    root = tmp_path / LINUX_ROOT
+    make_profile(root, "abc.default")
+    write_ini(
+        root,
+        "[Profile0]\nName=default\nIsRelative=1\nPath=abc.default\nDefault=1\n",
+    )
+    monkeypatch.setattr("ffinfo_cli.commands.transfer._host", lambda: host(tmp_path))
+
+    assert transfer_command.complete_profile("") == [str(root / "abc.default")]
+    assert transfer_command.complete_profile(str(root / "ab")) == [str(root / "abc.default")]
+    assert transfer_command.complete_profile("zzz") == []
+
+
+def test_profile_completion_is_silent_when_discovery_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """探测本身炸了也不该把错误喷到 shell 上 —— 空候选。"""
+
+    def boom() -> HostContext:
+        raise RuntimeError("探测挂了")
+
+    monkeypatch.setattr("ffinfo_cli.commands.transfer._host", boom)
+
+    assert transfer_command.complete_profile("") == []

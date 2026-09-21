@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -122,6 +123,61 @@ async def _collection_key(store: Store, root_key: KeyBundle, collection: str) ->
         msg = "crypto/keys 解不开 —— 这份凭据和库里的数据不是同一个账号？"
         raise ConfigurationError(msg) from exc
     return keys.key_for_collection(collection)
+
+
+async def _completion_records(
+    *,
+    database_path: Path,
+    identity_path: Path,
+    credentials_path: Path,
+    collection: str,
+) -> tuple[Sequence[tuple[str, str | None]], KeyBundle]:
+    """补全专用：**只读**打开库，读出 collection 的密文并解出它的密钥。
+
+    走 :func:`open_database` 的 ``read_only=True`` —— TAB 补全绝不建表、不迁移、不写。
+    """
+    store = await open_database(database_path, read_only=True)
+    records = await store.load_records(collection)
+    key = await cloud_key(
+        store=store,
+        identity_path=identity_path,
+        credentials_path=credentials_path,
+        collection=collection,
+    )
+    return records, key
+
+
+def completion_values(
+    *,
+    database_path: Path,
+    identity_path: Path,
+    credentials_path: Path,
+    collection: str,
+    extract: Callable[[Sequence[tuple[str, str | None]], KeyBundle], Sequence[str]],
+    incomplete: str,
+) -> list[str]:
+    """读库 → 解密 → ``extract`` 抽候选 → 按 ``incomplete`` 过滤。给 shell 补全用。
+
+    **整体静默**：库不存在 / 没凭据 / 解密失败 / 记录坏掉，一律空列表 ——
+    绝不写 stderr、绝不非零退出。补全错误污染 shell 最招人烦。
+
+    每次 TAB 起一个新进程，本地库小，取完就算（不做缓存，YAGNI）。
+    """
+    try:
+        if not database_path.is_file():
+            return []
+        records, key = asyncio.run(
+            _completion_records(
+                database_path=database_path,
+                identity_path=identity_path,
+                credentials_path=credentials_path,
+                collection=collection,
+            )
+        )
+        values = extract(records, key)
+        return [value for value in dict.fromkeys(values) if value.startswith(incomplete)]
+    except Exception:
+        return []
 
 
 def guard_all_failed(records: int, produced: int, skipped: int, *, fallback: int = 0) -> None:
