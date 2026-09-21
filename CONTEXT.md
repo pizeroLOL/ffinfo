@@ -1,6 +1,6 @@
 # ffinfo
 
-把 Firefox 浏览数据（云端 Sync + 本地 `places.sqlite`）搬到本地 SQLite、输出 JSON 给 agent 的工具。
+把 Firefox 浏览数据（云端 Sync + firefox `places.sqlite`）搬到本地 SQLite、输出 JSON 给 agent 的工具。
 这份词汇表是本领域**一词一义**的约定：出现同义词时，以本表选定的那个为准。
 
 ## 数据源与出处

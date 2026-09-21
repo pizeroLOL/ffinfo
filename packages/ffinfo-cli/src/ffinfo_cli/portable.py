@@ -8,7 +8,7 @@
 | 表 | 装什么 |
 | --- | --- |
 | ``ffinfo_export`` | 元数据：``schema_version`` · 来源 · 导出时间 · WAL 状态 · 计数 |
-| ``ffinfo_visits`` | 本地 ``places.sqlite`` 里的每一次访问 |
+| ``ffinfo_visits`` | firefox ``places.sqlite`` 里的每一次访问 |
 | ``ffinfo_records`` | 云端拉下来的加密记录（原样，不解密） |
 | ``ffinfo_cursors`` | 每个 collection 的同步游标 |
 
@@ -370,7 +370,7 @@ def _warnings(
     found: list[str] = []
     if meta.visits != len(visits):
         found.append(
-            f"元数据说有 {meta.visits} 条本地访问，文件里只有 {len(visits)} 条 —— "
+            f"元数据说有 {meta.visits} 条 firefox 访问，文件里只有 {len(visits)} 条 —— "
             f"这份文件不完整（拷贝中断？还是被改过？）。重新 export 一份更稳妥"
         )
     if meta.sync_records != len(records):

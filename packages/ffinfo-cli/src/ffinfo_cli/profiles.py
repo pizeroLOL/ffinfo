@@ -184,7 +184,7 @@ def _notes(
     if not has_profiles:
         notes.append(
             "这台机器上没找到 Firefox profile（找过的目录见 searched_roots）—— "
-            "本地那半历史要在**有 Firefox 的机器**上 `ffinfo-cli export`，再 import 过来。"
+            "firefox 那半历史要在**有 Firefox 的机器**上 `ffinfo-cli export`，再 import 过来。"
         )
     if not credentials_exist:
         notes.append("还没登录过：先跑 `ffinfo-cli login`。")

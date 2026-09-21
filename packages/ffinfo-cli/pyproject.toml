@@ -1,7 +1,7 @@
 [project]
 name = "ffinfo-cli"
 version = "0.1.0"
-description = "把 Firefox 数据（Sync + 本地 places.sqlite）拉到本地 SQLite，输出 JSON 给 agent"
+description = "把 Firefox 数据（Sync + firefox places.sqlite）拉到本地 SQLite，输出 JSON 给 agent"
 readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "MPL-2.0" }

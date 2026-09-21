@@ -52,7 +52,7 @@ async def test_reports_the_profiles_it_found(tmp_path: Path) -> None:
 
 
 async def test_missing_firefox_says_where_it_looked(tmp_path: Path) -> None:
-    """找不到 profile 不是错误 —— 把找过的地方列出来，并说明本地数据怎么来。"""
+    """找不到 profile 不是错误 —— 把找过的地方列出来，并说明 firefox 数据怎么来。"""
     report = await build_report(
         home=tmp_path / "home",
         platform="linux",

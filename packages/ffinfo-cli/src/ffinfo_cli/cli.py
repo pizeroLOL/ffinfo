@@ -42,7 +42,7 @@ from ffinfo_cli.transfer import (
 
 app = typer.Typer(
     name="ffinfo-cli",
-    help="把 Firefox 浏览数据（云端 Sync + 本地 places.sqlite）拉到本地 SQLite，输出 JSON。",
+    help="把 Firefox 浏览数据（云端 Sync + firefox places.sqlite）拉到本地 SQLite，输出 JSON。",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -267,7 +267,7 @@ def export(
     destination: Path = _DESTINATION,
     profile: Path | None = _PROFILE,
 ) -> None:
-    """在**有 Firefox 的机器**上跑：把本地历史导出成一份便携文件。
+    """在**有 Firefox 的机器**上跑：把 firefox 历史导出成一份便携文件。
 
     会连 ``places.sqlite-wal`` 一起带走 —— 只拷主文件会静默丢掉最近的记录。
     """

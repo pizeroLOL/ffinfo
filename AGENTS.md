@@ -4,7 +4,7 @@
 
 ## 项目速览
 
-**ffinfo** —— 把 Firefox 浏览数据（云端 Sync + 本地 `places.sqlite`）拉到本地 SQLite，
+**ffinfo** —— 把 Firefox 浏览数据（云端 Sync + firefox `places.sqlite`）拉到本地 SQLite，
 输出纯 JSON 给 agent 消费。真正的用户是 agent，不是人。
 
 | 包 | 职责 |

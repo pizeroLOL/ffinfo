@@ -1,4 +1,4 @@
-"""本地 places.sqlite：快照 + 读取。
+"""firefox places.sqlite：快照 + 读取。
 
 **WAL 是这个文件最大的坑**：Firefox 跑着的时候最近的访问还躺在 ``places.sqlite-wal``
 里，只拷主文件会**静默**丢掉它们。所以这里把"带上 -wal / -shm"做成硬行为，并用测试锁住。

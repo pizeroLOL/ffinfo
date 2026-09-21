@@ -5,7 +5,7 @@
 > 徽章指向的这个仓库是**私有**的 —— 没登录的访客看不到它（徽章会显示成灰色的
 > "no status"）。想看真实的红绿，得先有仓库权限。
 
-把 Firefox 浏览数据（云端 Sync + 本地 `places.sqlite`）拉到本地 SQLite，
+把 Firefox 浏览数据（云端 Sync + firefox `places.sqlite`）拉到本地 SQLite，
 输出纯 JSON 给 agent 消费。
 
 ## 结构
@@ -24,7 +24,7 @@ uv run ffinfo-cli sync               # 从 Sync 拉数据，输出 JSON
 uv run ffinfo-cli list --limit 20    # 解密后的浏览历史，输出 JSON
 ```
 
-**本地那半历史**（云端同步只有 5000 条 / 60 天的上限）要在**装了 Firefox 的机器**上搬：
+**firefox 那半历史**（云端同步只有 5000 条 / 60 天的上限）要在**装了 Firefox 的机器**上搬：
 
 ```bash
 # 源机器（有 Firefox）

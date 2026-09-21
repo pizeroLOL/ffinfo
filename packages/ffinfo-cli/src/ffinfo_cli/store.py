@@ -522,8 +522,9 @@ async def open_database(
 ) -> Store:
     """打开本地库，表不存在就建，返回 :class:`Store`。**不建默认路径** —— 路径由调用者给。
 
-    老库里的 ``local_visits`` 先就地改名成 ``firefox_visits``（见 :func:`_migrate_firefox_visits`）
-    —— 改名前不建新表，否则新表一建就再也没机会改。
+    老库里的 ``local_visits`` 并进 ``firefox_visits``（见 :func:`_migrate_firefox_visits`）：
+    只有旧表就就地改名，两表并存就搬行再删旧表。**动手之前不建新表** —— 新表一建，
+    "只有旧表"那条改名路就再也没机会走。
 
     ``read_only=True``：**只读打开** —— 不建表、不迁移、不做重复行收敛。"把数据读出来带走"的
     命令（``export``）不该改本地状态。
@@ -536,7 +537,7 @@ async def open_database(
     _bind(engine)
     if read_only:
         return Store(engine)
-    await _migrate_firefox_visits()
+    await _migrate_firefox_visits(engine, warn)
     await SyncRecord.create_table(if_not_exists=True)
     await SyncCursor.create_table(if_not_exists=True)
     await FirefoxVisitRow.create_table(if_not_exists=True)
@@ -544,11 +545,17 @@ async def open_database(
     return Store(engine)
 
 
-async def _migrate_firefox_visits() -> None:
-    """老库里的 ``local_visits`` 就地改名成 ``firefox_visits``。
+async def _migrate_firefox_visits(engine: SQLiteEngine, warn: Callable[[str], None] | None) -> None:
+    """老库里的 ``local_visits`` 并进 ``firefox_visits``，然后删掉旧表。
 
-    **不改就是静默丢数据**：新表空着没人写、旧表没人读，已经导入的 firefox 访问
-    在查询里无声消失。只在"旧表在、新表不在"时动手；已经改过或新建的库不碰。
+    **不动就是静默丢数据**：新表空着没人写、旧表没人读，已经导入的 firefox 访问
+    在查询里无声消失。两种情形分开处理：
+
+    * **只有旧表**：就地 ``ALTER TABLE … RENAME TO …`` —— 一个字节都不用搬。
+    * **两表并存**（半迁移 / 手工改过）：按身份键 ``(machine, url, visited_at)`` 把旧表
+      独有的行补进新表，**已存在的不重复插**，然后删掉旧表。这一步**一个事务**完成 ——
+      搬一半、旧表又没了，那是最难收拾的状态。搬了多少条经 ``warn`` 报出去，
+      删表这种事不能没人知道。
     """
     tables = {
         str(row["name"])
@@ -557,8 +564,38 @@ async def _migrate_firefox_visits() -> None:
             " AND name IN ('local_visits', 'firefox_visits')"
         )
     }
-    if "local_visits" in tables and "firefox_visits" not in tables:
+    if "local_visits" not in tables:
+        return
+    if "firefox_visits" not in tables:
         await FirefoxVisitRow.raw("ALTER TABLE local_visits RENAME TO firefox_visits")
+        return
+
+    async def count_visits() -> int:
+        rows = await FirefoxVisitRow.raw("SELECT COUNT(*) AS n FROM firefox_visits")
+        return int(rows[0]["n"])
+
+    moved = 0
+    async with engine.transaction():
+        before = await count_visits()
+        await FirefoxVisitRow.raw(
+            "INSERT INTO firefox_visits (machine, url, title, visited_at, visit_type)"
+            " SELECT machine, url, title, visited_at, visit_type FROM ("
+            "  SELECT machine, url, title, visited_at, visit_type,"
+            "   ROW_NUMBER() OVER ("
+            "    PARTITION BY machine, url, visited_at ORDER BY id DESC"
+            "   ) AS rank FROM local_visits"
+            " ) AS old WHERE old.rank = 1 AND NOT EXISTS ("
+            "  SELECT 1 FROM firefox_visits AS fresh"
+            "  WHERE fresh.machine = old.machine AND fresh.url = old.url"
+            "   AND fresh.visited_at = old.visited_at)"
+        )
+        moved = await count_visits() - before
+        await FirefoxVisitRow.raw("DROP TABLE local_visits")
+    if warn is not None:
+        warn(
+            f"本地库里 local_visits 与 firefox_visits 两张表并存 —— 已把旧表独有的 "
+            f"{moved} 条 firefox 访问补进新表，并删掉旧表。"
+        )
 
 
 _RECORD_IDENTITY_INDEX: Final = "ux_sync_records_collection_record_id"

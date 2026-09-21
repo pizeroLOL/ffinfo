@@ -290,6 +290,113 @@ async def test_legacy_local_visits_table_is_migrated_on_open(tmp_path: Path) -> 
     assert stored[0].title == "A"
 
 
+async def test_coexisting_local_and_firefox_visits_are_merged(tmp_path: Path) -> None:
+    """两表并存（半迁移 / 手工改过）时，旧表独有的行要补进新表并删掉旧表。
+
+    以前只在"旧表在、新表不在"时改名 —— 两表并存就直接跳过，旧表数据被静默忽略。
+    这里盯的是三件事：**旧行读得到、重复的不重插、搬了多少条经 warn 报出来**。
+    """
+    path = tmp_path / "half-migrated.sqlite"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE firefox_visits (
+            id INTEGER PRIMARY KEY,
+            machine VARCHAR(128) NOT NULL,
+            url TEXT NOT NULL,
+            title TEXT NOT NULL,
+            visited_at BIGINT NOT NULL,
+            visit_type INTEGER NOT NULL
+        );
+        CREATE TABLE local_visits (
+            id INTEGER PRIMARY KEY,
+            machine VARCHAR(128) NOT NULL,
+            url TEXT NOT NULL,
+            title TEXT NOT NULL,
+            visited_at BIGINT NOT NULL,
+            visit_type INTEGER NOT NULL
+        );
+        INSERT INTO firefox_visits (machine, url, title, visited_at, visit_type) VALUES
+            ('test-laptop', 'https://shared.example/', 'Shared', 1700000000000000, 1),
+            ('test-laptop', 'https://new-only.example/', 'New only', 1700000002000000, 1);
+        INSERT INTO local_visits (machine, url, title, visited_at, visit_type) VALUES
+            ('test-laptop', 'https://shared.example/', 'Shared', 1700000000000000, 1),
+            ('test-laptop', 'https://old-only.example/', 'Old only', 1700000001000000, 1);
+        """
+    )
+    connection.commit()
+    connection.close()
+    warnings: list[str] = []
+
+    store = await open_database(path, warn=warnings.append)
+
+    stored = await store.load_firefox_visits()
+    assert [item.url for item in stored] == [
+        "https://shared.example/",
+        "https://old-only.example/",
+        "https://new-only.example/",
+    ]
+    tables = _table_names(path)
+    assert "local_visits" not in tables
+    assert "firefox_visits" in tables
+    assert len(warnings) == 1
+    assert "1 条" in warnings[0]
+    assert "local_visits" in warnings[0]
+
+
+async def test_coexisting_tables_do_not_duplicate_rows_that_are_already_there(
+    tmp_path: Path,
+) -> None:
+    """旧行和新表里的身份键一样时**不重插** —— 搬 0 条也要说清楚。"""
+    path = tmp_path / "half-migrated.sqlite"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE firefox_visits (
+            id INTEGER PRIMARY KEY,
+            machine VARCHAR(128) NOT NULL,
+            url TEXT NOT NULL,
+            title TEXT NOT NULL,
+            visited_at BIGINT NOT NULL,
+            visit_type INTEGER NOT NULL
+        );
+        CREATE TABLE local_visits (
+            id INTEGER PRIMARY KEY,
+            machine VARCHAR(128) NOT NULL,
+            url TEXT NOT NULL,
+            title TEXT NOT NULL,
+            visited_at BIGINT NOT NULL,
+            visit_type INTEGER NOT NULL
+        );
+        INSERT INTO firefox_visits (machine, url, title, visited_at, visit_type) VALUES
+            ('test-laptop', 'https://a.example/', 'A', 1700000000000000, 1);
+        INSERT INTO local_visits (machine, url, title, visited_at, visit_type) VALUES
+            ('test-laptop', 'https://a.example/', 'A', 1700000000000000, 1);
+        """
+    )
+    connection.commit()
+    connection.close()
+    warnings: list[str] = []
+
+    store = await open_database(path, warn=warnings.append)
+
+    assert len(await store.load_firefox_visits()) == 1
+    assert "local_visits" not in _table_names(path)
+    assert len(warnings) == 1
+    assert "0 条" in warnings[0]
+
+
+def _table_names(path: Path) -> set[str]:
+    connection = sqlite3.connect(path)
+    try:
+        return {
+            str(row[0])
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+    finally:
+        connection.close()
+
+
 async def test_read_only_open_leaves_a_legacy_database_alone(tmp_path: Path) -> None:
     """``read_only=True``：不建表、不收敛 —— 库里原来什么样，打开后还是什么样。"""
     path = tmp_path / "old.sqlite"

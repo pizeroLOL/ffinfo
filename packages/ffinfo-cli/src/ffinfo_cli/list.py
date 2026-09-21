@@ -341,7 +341,7 @@ def _merge_history(
             continue
         merged[key] = replace(
             existing,
-            # 本地那条没标题时，别把云端已有的标题丢了
+            # firefox 那条没标题时，别把云端已有的标题丢了
             title=existing.title or item.title,
             source="both",
             machine=item.machine,

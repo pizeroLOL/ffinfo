@@ -1,4 +1,4 @@
-"""本地 Firefox profile 的定位（见 ``docs/design.md`` §3.8）。
+"""firefox profile 的定位（见 ``docs/design.md`` §3.8）。
 
 ``export`` 只在**有 Firefox 的机器**上跑，它的第一件事就是找到那个 profile 的
 ``places.sqlite``。三平台路径不同，而且**不能猜目录名**（形如 ``<8位随机>.default-release``）——
@@ -148,7 +148,7 @@ def find_profile(
         f"没找到任何 Firefox profile（找过：{searched}）。"
         f"要么这台机器上没装过 Firefox，要么 profile 不在默认位置 —— "
         f"用 --profile <profile 目录> 直接指定（`ffinfo-cli profiles` 会把候选列出来）。"
-        f"另外：本地数据得先在**有 Firefox 的机器**上 export，再 import 过来"
+        f"另外：firefox 数据得先在**有 Firefox 的机器**上 export，再 import 过来"
     )
     raise ConfigurationError(msg)
 

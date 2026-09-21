@@ -13,7 +13,7 @@
 
 ## 0. 一句话
 
-> **一个把 Firefox 浏览数据从 Mozilla 云端和本地 `places.sqlite` 拉到本地 SQLite、输出纯 JSON 给 agent 消费的 CLI 工具；核心协议逻辑独立成一个可复用的 Python 库。**
+> **一个把 Firefox 浏览数据从 Mozilla 云端和 firefox `places.sqlite` 拉到本地 SQLite、输出纯 JSON 给 agent 消费的 CLI 工具；核心协议逻辑独立成一个可复用的 Python 库。**
 
 ---
 
@@ -38,8 +38,8 @@
 | # | 决策 | 备注 |
 |---|---|---|
 | 1 | 用途：**个人复盘** | 不是取证、不是清理、不是数据管道 |
-| 2 | 数据源：**双源** | ① Firefox Sync（远程）② 本地 `places.sqlite` |
-| 3 | 本地源前提：**源机器必须有 Firefox** | 靠 `export`/`import` 搬运到目标机器 |
+| 2 | 数据源：**双源** | ① Firefox Sync（远程）② firefox `places.sqlite` |
+| 3 | firefox 源前提：**源机器必须有 Firefox** | 靠 `export`/`import` 搬运到目标机器 |
 | 4 | 数据范围：**历史 + 书签 + 标签页**（~~表单~~ ❌ 已证实拿不到，见 §3.7） | 表单移入 TODO |
 | 5 | 边界：**严格只读** | 用 `#read` scope，不写回 Mozilla |
 | 6 | 输出：**纯数据** | 不做统计、不做 TUI（都进 TODO） |
@@ -122,7 +122,7 @@ pub const HISTORY_TTL: u32 = 5_184_000;    // 60 天过期（毫秒）
 ```
 
 **结论**：同步通道最多给你 5000 个 URL × 每个 20 次访问，且只保留最近 60 天。
-**这就是"双数据源"存在的全部理由** —— 要"非常大"的历史，只能读本地 `places.sqlite`。
+**这就是"双数据源"存在的全部理由** —— 要"非常大"的历史，只能读 firefox `places.sqlite`。
 
 ### 3.2 密钥派生链（核心算法，必须用测试向量验证）
 
@@ -283,15 +283,15 @@ struct HistoryRecord {
 `history` · `bookmarks` · `passwords` · `tabs` · `addresses` · `creditcards` · `addons` · `prefs` · `clients`
 
 **表单的两条出路**（首版选 A）：
-- **A（推荐）**：降级跳过。表单只有本地源有（`formhistory.sqlite`），会让"双源"模型出现单边特例
-- **B（进 TODO）**：本地通道加一个 `formhistory.sqlite` 读取器
+- **A（推荐）**：降级跳过。表单只有 firefox 源有（`formhistory.sqlite`），会让"双源"模型出现单边特例
+- **B（进 TODO）**：firefox 通道加一个 `formhistory.sqlite` 读取器
 
-> **云端 `forms` 和本地 `formhistory.sqlite` 是两回事，别混**：
+> **云端 `forms` 和 firefox `formhistory.sqlite` 是两回事，别混**：
 > 云端那 42768 条遗留记录**永远不拉**，白名单已经把它挡在门外；
-> 这里说的 A / B 是**本地**那个文件要不要读 —— 那是用户自己机器上的文件，来源清楚，
+> 这里说的 A / B 是**firefox** 那个文件要不要读 —— 那是用户自己机器上的文件，来源清楚，
 > 将来想做还能做。
 
-### 3.8 本地源：places.sqlite 与 export/import（08 号，2026-09-14）
+### 3.8 firefox 源：places.sqlite 与 export/import（08 号，2026-09-14）
 
 **profile 定位不猜目录名**（形如 `<8位随机>.default-release`），走 Firefox 自己的
 `profiles.ini`，认它标的那个 `Default=1`；新版 Firefox 把"默认是哪个"记在
@@ -319,7 +319,7 @@ Firefox 跑着的时候库是 WAL 模式，**最近的访问还在 `places.sqlit
 
 #### 合并键：`(url, 访问时刻)`
 
-云端那条的时刻来自记录里的 `date`，本地那条来自 `moz_historyvisits.visit_date` ——
+云端那条的时刻来自记录里的 `date`，firefox 那条来自 `moz_historyvisits.visit_date` ——
 两边都是 PRTime **微秒**。所以只要换算不引入误差，它们就能精确对上。这也是
 `ffinfo_cli/_time.py` 坚持整数运算（而不是 `value / 1_000_000`）的原因：
 **差 1 微秒，同一次访问就会出两行。**
@@ -334,7 +334,7 @@ firefox 源是空的（目标机器没导入过）就自然降级成单源。
 | 表 | 装什么 |
 | --- | --- |
 | `ffinfo_export` | `schema_version` · 来源机器 · profile · 导出时间 · WAL 状态 · 计数 |
-| `ffinfo_visits` | 本地访问 |
+| `ffinfo_visits` | firefox 访问 |
 | `ffinfo_records` | 云端加密记录（原样搬，不解密） |
 | `ffinfo_cursors` | 每个 collection 的同步游标 |
 
@@ -342,12 +342,12 @@ firefox 源是空的（目标机器没导入过）就自然降级成单源。
 **条数对不上账 / WAL 没带出来 → 收下但必须把告警交出去**，不静默接受。
 有人直接把 Firefox 的 `places.sqlite` 拷过来时，当场告诉他 `-wal` 的坑在哪。
 
-导入时三样东西各按各的规矩合并：本地访问按 `(机器, url, 时刻)` 认（重复导入幂等）；
+导入时三样东西各按各的规矩合并：firefox 访问按 `(机器, url, 时刻)` 认（重复导入幂等）；
 云端记录**只在导出的那条更新时才覆盖**（不拿旧数据盖新数据）；游标**只往前推**。
 
 #### 表单：两条出路，首版选 A
 
-云端 `forms` 永远不拉（白名单挡着，见 §3.7）；本地 `formhistory.sqlite` 是另一回事
+云端 `forms` 永远不拉（白名单挡着，见 §3.7）；firefox `formhistory.sqlite` 是另一回事
 （来源清楚），但会让"双源"模型出现单边特例 —— 首版**降级跳过**，进 TODO。
 
 #### 实测（2026-09-14，真账号）
@@ -355,8 +355,8 @@ firefox 源是空的（目标机器没导入过）就自然降级成单源。
 | 检查 | 结果 |
 | --- | --- |
 | 云端 | 4907 条记录 / 12139 次访问 |
-| 导入一条"与云端同一次访问"的本地记录后 | `matched` 11420 → **11421** —— 只多了本地独有的那条，**重合的没有重复** |
-| 重合那条的标记 | `source: "both"`，带云端 `record_id` 与本地机器名 |
+| 导入一条"与云端同一次访问"的 firefox 记录后 | `matched` 11420 → **11421** —— 只多了 firefox 独有的那条，**重合的没有重复** |
+| 重合那条的标记 | `source: "both"`，带云端 `record_id` 与 firefox 机器名 |
 | 重复导入同一份文件 | `visits_inserted: 0` / `visits_skipped: 2` —— 幂等 |
 
 ---
@@ -368,7 +368,7 @@ firefox 源是空的（目标机器没导入过）就自然降级成单源。
 | 官方 Python 客户端 **已归档**（2019-03-28，43⭐） | `mozilla-services/syncclient` |
 | 它用的是 **BrowserID/onepw 老协议**，不是现代 OAuth | `syncclient/client.py`（依赖 `PyBrowserID`、`PyFxA 0.3.0`） |
 | **GitHub 上零个工具能从 Mozilla 服务器拉历史** | 第一轮调研 |
-| 现存工具全是读本地 `places.sqlite` | `nexhq/firefox-dump`、`acquiredsecurity/forensic-webhistory` 等 |
+| 现存工具全是读 firefox `places.sqlite` | `nexhq/firefox-dump`、`acquiredsecurity/forensic-webhistory` 等 |
 
 ---
 
@@ -392,7 +392,7 @@ firefox 源是空的（目标机器没导入过）就自然降级成单源。
 - [ ] **趋势 / 统计**（Top 域名、时段分布、每日趋势）
 - [ ] **申请自己的 `client_id`**
 - [ ] **`localhost` 回调**（替换 oob）
-- [ ] **表单记录**（`forms` 已证实是死的 → 首版跳过；将来走本地 `formhistory.sqlite` 单边通道）
+- [ ] **表单记录**（`forms` 已证实是死的 → 首版跳过；将来走 firefox `formhistory.sqlite` 单边通道）
 - [ ] **开源发布**
 
 ---
@@ -434,7 +434,7 @@ cd application-services && git sparse-checkout set components/places components/
 
 | 路径 | 状态 |
 |---|---|
-| `firefox-history/` | 上一版（读本地 `places.sqlite` 的单文件项目）。**数据源层作废，但 `pyproject.toml` + src layout + CLI 结构可复用** |
+| `firefox-history/` | 上一版（读 firefox `places.sqlite` 的单文件项目）。**数据源层作废，但 `pyproject.toml` + src layout + CLI 结构可复用** |
 | `tools/firefox_history.py` | 更早的单文件版本，可丢弃 |
 
 ---
@@ -471,7 +471,7 @@ cd application-services && git sparse-checkout set components/places components/
 
 | # | 问题 | 结论 |
 |---|---|---|
-| A | 如果 `forms` 确认已死 —— 降级跳过，还是另想办法？ | ✅ **已定案（见 §3.7）**：云端 `forms` 一条都不拉（白名单挡着）；本地 `formhistory.sqlite` 留作将来的单边通道 |
+| A | 如果 `forms` 确认已死 —— 降级跳过，还是另想办法？ | ✅ **已定案（见 §3.7）**：云端 `forms` 一条都不拉（白名单挡着）；firefox `formhistory.sqlite` 留作将来的单边通道 |
 | B | `research/` 的 47M 克隆 —— 开工后保留还是删除？ | ✅ **已定案（2026-09-14）**：浅克隆只留在作者本机、不进版本控制；§6.1 改成上游链接 + 复现命令，文档不再依赖本地副本 |
 | C | **pyright 修法** | ✅ **已拍板（2026-09-14）**：**先豁免** unknown 系列（`reportUnknown*` + `reportAttributeAccessIssue`），把"自己写的类型"这层检查保住；`include` 的通配已修，检查器真的在跑（52 个文件 / 0 errors）。补依赖存根（pyrage / piccolo）记进待办，补完把豁免开回来 |
 | D | Python 版本策略：现在 `requires-python = ">=3.14"` 且真用了 PEP 758。库的卖点是「官方客户端归档后市面唯一替代品」—— 锁死在 3.14 等于掐死卖点；放宽要改写那处语法 | ✅ **已拍板（2026-09-14）：保持 3.14 不动** —— `uv sync` 会自己把解释器拉下来，"锁死 3.14"不构成使用门槛。将来真要放宽，再改写那处语法 |
