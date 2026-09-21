@@ -198,6 +198,16 @@ def test_application_level_tombstone_is_not_a_failure() -> None:
     assert report.entries == ()
 
 
+def test_deleted_flag_tombstone_accepts_pydantic_bool_semantics() -> None:
+    """``{"deleted": 1}`` 也是墓碑 —— 与模型里 ``deleted: bool`` 的宽松解析一致。"""
+    cleartext = json.dumps({"id": "gone", "deleted": 1})
+
+    report = decrypt_history([("gone", encrypt(cleartext))], KEY)
+
+    assert report.tombstones == 1
+    assert report.skipped == ()
+
+
 def test_total_counts_everything_seen() -> None:
     report = decrypt_history(
         [("gone", None), ("broken", "{}"), ("rec1", encrypt(record_json()))], KEY

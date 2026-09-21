@@ -91,6 +91,17 @@ def test_deleted_records_are_tombstones_not_failures() -> None:
     assert report.roots == ()
 
 
+def test_deleted_flag_is_a_tombstone_even_when_not_a_json_bool() -> None:
+    """``deleted: 1``（pydantic 当 True）也是墓碑 —— 判别别收窄成只认 JSON ``true``。"""
+    cleartext = json.dumps({"id": "gone", "type": "bookmark", "deleted": 1})
+
+    report = parse_bookmarks([("gone", encrypt(cleartext))], KEY)
+
+    assert report.tombstones == 1
+    assert report.skipped == ()
+    assert report.roots == ()
+
+
 def test_bsos_without_payload_are_tombstones_too() -> None:
     report = parse_bookmarks([("gone", None)], KEY)
 

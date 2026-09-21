@@ -16,13 +16,19 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from typing import Final
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from ffinfo.crypto import EncryptedPayload, KeyBundle
 from ffinfo.errors import DecryptionError
 
 __all__ = ["DecryptBatch", "decrypt_records", "single"]
+
+_DELETED_FLAG: Final[TypeAdapter[bool]] = TypeAdapter(bool)
+"""读明文里的 ``deleted`` —— 复用 pydantic 的 bool 语义（``1`` / ``"true"`` 也算），
+与各 collection 模型里的 ``deleted: bool`` 保持一致。**不能写 ``is True``**：
+那会把 ``deleted: 1`` 的书签当成正常书签展开。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,9 +85,14 @@ def decrypt_records[ModelT: BaseModel, ItemT](
         except json.JSONDecodeError as exc:
             skipped.append((record_id, _reason(exc, what)))
             continue
-        if isinstance(decoded, dict) and "deleted" in decoded and decoded["deleted"] is True:
-            tombstones += 1
-            continue
+        if isinstance(decoded, dict) and "deleted" in decoded:
+            try:
+                deleted = _DELETED_FLAG.validate_python(decoded["deleted"])
+            except ValidationError:
+                deleted = False
+            if deleted:
+                tombstones += 1
+                continue
         try:
             record = model.model_validate(decoded)
         except ValidationError as exc:
