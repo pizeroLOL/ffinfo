@@ -23,7 +23,8 @@ uv run ruff check .                       # lint
 uv run ruff format .                      # format
 uv run pyright --project pyproject.toml   # 类型检查（strict）
 uv run pytest                             # 测试
-uv run prek install                       # 装 git 钩子
+uv run prek install                       # 装 commit 钩子（ruff / 格式 / pyright）
+uv run prek install --hook-type pre-push  # 装 push 钩子（跑 pytest）
 ```
 
 > ⚠️ **`pyright` 必须带 `--project pyproject.toml`。**
@@ -38,6 +39,12 @@ uv run prek install                       # 装 git 钩子
 > **git 钩子用 [prek](https://github.com/j178/prek)** —— pre-commit 的 Rust 替代，
 > 读同一份 `.pre-commit-config.yaml`。ruff / ruff-format / pyright 都走 **local 钩子**：
 > 跑的就是 `uv run` 那一份，不会像钉死 rev 的钩子那样跟 `pyproject.toml` 漂开。
+>
+> **开工第一件事**：确认钩子装好了 —— 没装就先
+> `uv run prek install && uv run prek install --hook-type pre-push`
+> （检查方式：`test -f .git/hooks/pre-commit && test -f .git/hooks/pre-push`）。
+> `pre-commit` 阶段挡 ruff / ruff-format / pyright；`pre-push` 阶段才跑 `pytest`
+> （只有 pytest 钉在 push，见 `.pre-commit-config.yaml`）。三平台矩阵仍以 CI 为准。
 
 ## 代码约定
 
@@ -84,7 +91,7 @@ uv run prek install                       # 装 git 钩子
 | 东西 | 在哪 | 说明 |
 | --- | --- | --- |
 | 工单 / spec | `.scratch/<feature-slug>/` | 本地 markdown；`.scratch/` 在 `.gitignore` 里。一票一文件：`issues/NN-<slug>.md` |
-| 工单状态 | 每个文件顶部一行 `Status:` | 取值见 [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md) |
+| 工单状态 | 每个文件顶部一行 `**Status:**` | 取值见 [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md)；收工时翻成 `done` 并勾验收项 |
 | 格式约定 | [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md) | 一票一文件、`## Comments` 追加在末尾 |
 | 领域词汇 | [`CONTEXT.md`](CONTEXT.md) | 一词一义；`docs/adr/` 还没建，用到时再建 |
 

@@ -1,34 +1,59 @@
 # 用 prek 跑（pre-commit 的 Rust 替代）—— 读的是同一份配置，所以文件名没改。
+#
+# 两个阶段各管一段：`pre-commit` 走快的（ruff / 格式 / pyright），`pre-push` 才跑测试。
+# prek **默认让没写 `stages` 的钩子在每个阶段都跑**，所以每个钩子都显式钉住自己的阶段 ——
+# 否则装了 pre-push shim 之后，lint 会在 push 时被重复跑一遍。
 repos:
   # 为什么不用 ruff-pre-commit 那个仓库：它的 rev 是钉死的，而 ruff 的
   # target-version 跟着项目走 —— v0.8.4 不认识 py314，钩子直接 TOML 解析失败。
   # local + system 没有这个漂移：`uv run ruff` 什么样，钩子就是什么样。
+  #
+  # 全部带 `--frozen`：不带的话 `uv run` 会按本地索引（镜像）重新解析并把 uv.lock
+  # 里的 pypi.org URL 改写成镜像地址 —— 一提交就把本地镜像带进版本库（见 pyproject.toml
+  # 顶部关于镜像的提示）。锁文件只该由 `uv lock` 显式改动。
   - repo: local
     hooks:
       - id: ruff
         name: ruff
-        entry: uv run ruff check --fix
+        entry: uv run --frozen ruff check --fix
         language: system
         types: [python]
+        stages: [pre-commit]
       - id: ruff-format
         name: ruff-format
-        entry: uv run ruff format
+        entry: uv run --frozen ruff format
         language: system
         types: [python]
+        stages: [pre-commit]
       - id: pyright
         name: pyright
         # 显式 --project：防止 pyright 向上找到祖先目录的 pyrightconfig.json 抢配置
-        entry: uv run pyright --project pyproject.toml
+        entry: uv run --frozen pyright --project pyproject.toml
         language: system
         types: [python]
         pass_filenames: false
+        stages: [pre-commit]
+      - id: pytest
+        name: pytest
+        # 测试慢（~10s+），留到 pre-push；commit 阶段只挡快的那些
+        entry: uv run --frozen pytest -q
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-push]
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
+        stages: [pre-commit]
       - id: end-of-file-fixer
+        stages: [pre-commit]
       - id: check-yaml
+        stages: [pre-commit]
       - id: check-toml
+        stages: [pre-commit]
       - id: check-added-large-files
+        stages: [pre-commit]
       - id: detect-private-key
+        stages: [pre-commit]

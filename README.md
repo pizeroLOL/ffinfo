@@ -69,7 +69,8 @@ uv run ruff check .                       # lint
 uv run ruff format .                      # format
 uv run pyright --project pyproject.toml   # 类型检查（strict）
 uv run pytest                             # 测试
-uv run prek install                       # 装 git 钩子
+uv run prek install                       # 装 commit 钩子（ruff / 格式 / pyright）
+uv run prek install --hook-type pre-push  # 装 push 钩子（跑 pytest）
 ```
 
 > `pyright` 要带 `--project pyproject.toml` —— 它会向上遍历目录找祖先里的
