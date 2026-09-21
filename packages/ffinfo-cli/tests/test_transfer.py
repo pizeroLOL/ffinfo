@@ -21,7 +21,7 @@ import pytest
 
 from ffinfo.errors import ConfigurationError
 from ffinfo.storage import EncryptedBso
-from ffinfo_cli.places import FirefoxVisit, HostContext
+from ffinfo_cli.places import FirefoxVisit
 from ffinfo_cli.portable import (
     ExportSource,
     PortableCursor,
@@ -44,15 +44,11 @@ from ffinfo_cli.transfer import (
     run_export,
     run_import,
 )
-from support import US, add_visits, build_places
+from support import US, add_visits, build_places, host
 from support import us_of as micros
 
 DAY = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
 MOMENT = "2026-09-14T02:00:00+00:00"
-
-
-def host(home: Path, platform: str = "linux", env: dict[str, str] | None = None) -> HostContext:
-    return HostContext(home=home, platform=platform, env=env if env is not None else {})
 
 
 def profile_with_firefox(home: Path, visits: list[tuple[str, str | None, int, int]]) -> Path:

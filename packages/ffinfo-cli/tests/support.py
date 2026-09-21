@@ -1,4 +1,4 @@
-"""测试共享的小工具 —— 现造一个**结构真实**的 ``places.sqlite``。
+"""测试共享的小工具 —— 现造 ``places.sqlite``、打包 ``HostContext``。
 
 只建我们真正会读的两张表，字段按 Firefox 真实的 schema 来。要造出"Firefox 正在运行"
 那种形态（老记录在主文件里、新记录停在 ``-wal`` 里）就用 ``wal=True``。
@@ -14,7 +14,9 @@ from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
-__all__ = ["SCHEMA", "US", "add_visits", "build_places", "micros", "us_of"]
+from ffinfo_cli.places import HostContext
+
+__all__ = ["SCHEMA", "US", "add_visits", "build_places", "host", "micros", "us_of"]
 
 US = 1_000_000
 
@@ -52,6 +54,15 @@ def us_of(moment: datetime) -> int:
 
 micros = us_of
 """老名字，留着省得改一堆调用点。"""
+
+
+def host(home: Path, platform: str = "linux", env: dict[str, str] | None = None) -> HostContext:
+    """测试用的 :class:`HostContext` —— 三件套由各测试文件传入。
+
+    放在这里而不是每个 test 文件各一份：签名一变就要改三处（本模块开头那句
+    "两份拷贝已经开始漂了" 说的就是同一件事）。
+    """
+    return HostContext(home=home, platform=platform, env=env if env is not None else {})
 
 
 def build_places(

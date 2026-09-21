@@ -12,16 +12,11 @@ import pytest
 from typer.testing import CliRunner
 
 from ffinfo_cli.cli import app
-from ffinfo_cli.places import HostContext
 from ffinfo_cli.profiles import LocalPaths, build_report
 from ffinfo_cli.store import open_database
-from support import build_places
+from support import build_places, host
 
 NOW = 1_789_320_612.0
-
-
-def host(home: Path, platform: str = "linux", env: dict[str, str] | None = None) -> HostContext:
-    return HostContext(home=home, platform=platform, env=env if env is not None else {})
 
 
 def paths_for(tmp_path: Path) -> LocalPaths:

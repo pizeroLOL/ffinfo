@@ -12,14 +12,11 @@ from pathlib import Path
 import pytest
 
 from ffinfo.errors import ConfigurationError
-from ffinfo_cli.places import HostContext, discover_profiles, find_profile
+from ffinfo_cli.places import discover_profiles, find_profile
+from support import host
 
 LINUX_ROOT = Path(".mozilla/firefox")
 MACOS_ROOT = Path("Library/Application Support/Firefox")
-
-
-def host(home: Path, platform: str = "linux", env: dict[str, str] | None = None) -> HostContext:
-    return HostContext(home=home, platform=platform, env=env if env is not None else {})
 
 
 def make_profile(root: Path, name: str, *, with_db: bool = True) -> Path:
