@@ -8,11 +8,29 @@ repos:
   # target-version 跟着项目走 —— v0.8.4 不认识 py314，钩子直接 TOML 解析失败。
   # local + system 没有这个漂移：`uv run ruff` 什么样，钩子就是什么样。
   #
-  # 全部带 `--frozen`：不带的话 `uv run` 会按本地索引（镜像）重新解析并把 uv.lock
-  # 里的 pypi.org URL 改写成镜像地址 —— 一提交就把本地镜像带进版本库（见 pyproject.toml
-  # 顶部关于镜像的提示）。锁文件只该由 `uv lock` 显式改动。
+  # 其余钩子全部带 `--frozen`：不带的话 `uv run` 会按本地索引（镜像）重新解析并把
+  # uv.lock 里的 pypi.org URL 改写成镜像地址 —— 一提交就把本地镜像带进版本库
+  # （见 pyproject.toml 顶部关于镜像的提示）。锁文件只该由 `uv lock` 显式改动。
+  # 万一已经被写脏了，下面的 `uv-lock-pypi` 会在提交前自动修回来。
   - repo: local
     hooks:
+      # 提交 uv.lock 前：若里面混进了镜像 registry，自动还原成 pypi.org。
+      # 出处：https://mirrors.ustc.edu.cn/help/pypi.html
+      #   「设置 index 会改变 uv.lock 的内容」→ 提交前 `uv lock --refresh` 还原。
+      # 本机全局 uv.toml 常年指 USTC 镜像，裸 `uv lock` / `uv add` 就会写脏 ——
+      # 靠人肉记得带环境变量不现实，所以钉成钩子。UV_DEFAULT_INDEX 覆盖全局 default
+      # （help 页写的 UV_INDEX 实测也能还原，这里用语义更直的 default）。
+      # 钩子改了文件时 pre-commit 会中止本次 commit 并要求重跑 —— 第二次进来锁已干净，
+      # 直接过。只在 uv.lock 进暂存区时才触发，平时零开销。
+      - id: uv-lock-pypi
+        name: uv-lock-pypi
+        # YAML 双引号：\" 会变成 "，交给 bash 的是
+        #   grep -E 'registry = "' … | grep -qvF 'registry = "https://pypi.org/simple"'
+        entry: bash -c "if grep -E 'registry = \"' uv.lock | grep -qvF 'registry = \"https://pypi.org/simple\"'; then echo 'uv.lock 含非 pypi.org registry，还原中…'; UV_DEFAULT_INDEX=https://pypi.org/simple uv lock --refresh && git add uv.lock; else echo 'uv.lock 已是 pypi.org'; fi"
+        language: system
+        files: ^uv\.lock$
+        stages: [pre-commit]
+        pass_filenames: false
       - id: ruff
         name: ruff
         entry: uv run --frozen ruff check --fix

@@ -16,6 +16,10 @@ members = ["packages/*"]
 ffinfo = { workspace = true }
 ffinfo-cli = { workspace = true }
 
+[[tool.uv.index]]
+url = "https://pypi.org/simple"
+default = true
+
 # 默认走 PyPI —— 别人 clone 下来不该被引到某个特定镜像。
 # 国内网络想显著加速，二选一（都别提交）：
 #   1. 环境变量：export UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple/
