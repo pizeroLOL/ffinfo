@@ -355,8 +355,10 @@ firefox 源是空的（目标机器没导入过）就自然降级成单源。**�
 **条数对不上账 / WAL 没带出来 → 收下但必须把告警交出去**，不静默接受。
 有人直接把 Firefox 的 `places.sqlite` 拷过来时，当场告诉他 `-wal` 的坑在哪。
 
-导入时三样东西各按各的规矩合并：firefox 访问按 `(机器, url, 时刻)` 认（重复导入幂等）；
-云端记录**只在导出的那条更新时才覆盖**（不拿旧数据盖新数据）；游标**只往前推**。
+导入时三样东西各按各的规矩合并：firefox 访问按 `(机器, url, 时刻)` 认（重复导入幂等；
+**标题变了算 `visits_updated`**，不冒充插入/跳过）；云端记录**只在导出的那条更新时才覆盖**
+（不拿旧数据盖新数据）；游标**只往前推**。`ImportReport.format_version` **3** 带
+`visits_updated`，满足 `inserted + updated + skipped == 输入条数`。
 批量插入一律**分块**（每批 100 行）—— piccolo 把整批拼成一条多值 `INSERT`，
 真实历史一次上万条会撞上 SQLite 的变量数上限（`too many SQL variables`）。
 
@@ -572,9 +574,9 @@ dispatcher（改为 `run_history` / `run_bookmarks` / `run_tabs` 与对应 `list
   纯函数、返回字符串，命令层 `typer.echo` 写出 —— interface 即测试面。
 - `machine=True` → JSON（`json.dumps(report.model_dump(), …)` + `_json_default` 处理
   `BookmarkNode` / `ClientTabs` 里的 `datetime`）；`machine=False` → 人读。
-- 分派用 `match report:` 结构模式匹配（报告的五元组 union 是封闭的，pyright 能查穷尽性），
+- 分派用 `match report:` 结构模式匹配（报告 union 是封闭的，pyright 能查穷尽性），
   每个分支一个私有 `_render_*` formatter。注册表被否 —— 丢穷尽性、多一层间接。
-- `type Report = ListReport | SyncReport | ExportReport | ImportReport | ProfilesReport`。
+- `type Report = ListReport | SyncReport | ExportReport | ImportReport | ProfilesReport | LoginReport`。
   **序列化不再散在各报告 module** —— §9.1 里 `list/report.py` 只留 union 别名。
 
 **`-j / --json`**：root callback 上的全局选项，写在子命令**之前**（`ffinfo-cli -j sync` /
@@ -584,8 +586,10 @@ dispatcher（改为 `run_history` / `run_bookmarks` / `run_tabs` 与对应 `list
 （`-j` 时默认关，显式 `--progress` 仍开）—— agent 的 stderr 上不能混进进度行。
 
 **错误与警告跟随模式**：默认 stderr 是 `错误：…`（人读），`-j` 时才是 stderr JSON。
-**退出码分档不变**。`_fail` / `_fail_usage` / `_warn` / `_emit_error` 接上已解析的模式；
+**退出码分档不变**（另有用户中断 **130 / `aborted`**，表在 `README.md`）。
+`_fail` / `_fail_usage` / `_warn` / `_emit_error` 接上已解析的模式；
 `README.md` 那张表加一句「错误 JSON 只在 `-j` 时」。
+`-j login` **成功**也经同一 `render` seam 出 JSON（`LoginReport`），不再散文。
 
 **人读呈现**：
 
