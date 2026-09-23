@@ -83,7 +83,7 @@ uv run ffinfo-cli import --from-firefox --profile <目录>   # 手动指定
 uv run ruff check .                       # lint
 uv run ruff format .                      # format
 uv run pyright --project pyproject.toml   # 类型检查（strict）
-uv run pytest                             # 测试
+uv run pytest                             # 测试（自带 --cov，覆盖率 ≥90 才过）
 uv run prek install                       # 装 commit 钩子（ruff / 格式 / pyright）
 uv run prek install --hook-type pre-push  # 装 push 钩子（跑 pytest）
 ```

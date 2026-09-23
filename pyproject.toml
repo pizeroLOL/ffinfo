@@ -41,6 +41,7 @@ dev = [
     "ruff>=0.8",
     "pyright>=1.1.390",
     "prek>=0.5.3",
+    "pytest-cov",
 ]
 
 [tool.ruff]
@@ -114,4 +115,16 @@ pythonpath = [
 ]
 asyncio_mode = "auto"
 # 两个包各有同名 test 文件，用 importlib 模式避免 basename 冲突
-addopts = "-ra --strict-markers --import-mode=importlib"
+# --cov 走 [tool.coverage]（source 钉死两个 src，不含 tests）
+addopts = "-ra --strict-markers --import-mode=importlib --cov --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["packages/ffinfo/src", "packages/ffinfo-cli/src"]
+omit = ["*/tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+# 基线 ~94%（2026-09-23 实测 2930 stmt / 168 miss）。钉 90 留余量：
+# 只挡「掉了好几个点」的回归，不为追平剩余死角挡提交。
+fail_under = 90
