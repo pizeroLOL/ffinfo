@@ -1,7 +1,9 @@
 """``ffinfo-cli sync`` —— 从 Firefox Sync 拉数据并落盘。
 
 **拉全了才写库。** 中途被要求退避、集合被改、条数对不上 —— 库里一个字节都不会动，
-**游标也不推进**。半截数据比没有数据更坏：agent 分不出"这个账号就这么多"还是"上次没拉完"。
+**游标也不推进**：全部 collection 拉完后一次 ``store.commit`` 落盘，records 与游标
+同一事务（"拉全了才动、中途失败全不动"的实现与推理在那里的 docstring）。
+半截数据比没有数据更坏：agent 分不出"这个账号就这么多"还是"上次没拉完"。
 
 第一次是全量；之后每次只拉**上次同步之后的变更**（``newer=<游标>``）。
 ``--full`` 可以强制回到全量 —— 增量拉久了偶尔需要一次全量来"对账"
@@ -30,7 +32,7 @@ from ffinfo.storage import (
     SyncStorageClient,
 )
 from ffinfo_cli.login import refresh_credentials
-from ffinfo_cli.store import ApplyResult, CollectionBatch, open_database
+from ffinfo_cli.store import ApplyResult, CollectionBatch, TargetCursor, open_database
 
 _HTTP_TIMEOUT_SECONDS: Final = 60.0
 
@@ -139,8 +141,10 @@ async def run_sync(
     full: bool = False,
     clock: Callable[[], float] = time.time,
 ) -> SyncReport:
-    """拉一组 collection（外加协议数据），全部校验通过后一起落盘、再推进游标。
+    """拉一组 collection（外加协议数据），**全部拉完后一次** ``store.commit`` 落盘。
 
+    records 与各自目标游标同一事务 —— 本函数只做 fetch-then-commit，
+    不编排"先写哪、后动哪"（那是 commit 的内部知识）。
     HTTP 客户端与时钟由调用者注入 —— 测试才能塞 mock、不真的 ``sleep``。
     """
     for name in collections:
@@ -194,16 +198,18 @@ async def run_sync(
         fetches[name] = fetch
         batches.append(CollectionBatch(collection=name, records=fetch.records, full=cursor is None))
 
-    results = await store.store_batches(batches)
-
     now = clock()
-    for name in targets:
-        await store.save_cursor(
-            name,
-            last_modified=fetches[name].last_modified,
-            synced_at=now,
-            records=await store.count_records(name),
-        )
+    results = await store.commit(
+        batches,
+        [
+            TargetCursor(
+                collection=name,
+                last_modified=fetches[name].last_modified,
+                synced_at=now,
+            )
+            for name in targets
+        ],
+    )
 
     return SyncReport(
         collections=[

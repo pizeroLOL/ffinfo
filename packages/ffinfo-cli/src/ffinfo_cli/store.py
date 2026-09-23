@@ -46,6 +46,7 @@ __all__ = [
     "StoredVisit",
     "SyncCursor",
     "SyncRecord",
+    "TargetCursor",
     "open_database",
 ]
 
@@ -64,8 +65,9 @@ class SyncRecord(Table, tablename="sync_records"):
 class SyncCursor(Table, tablename="sync_cursors"):
     """每个 collection 的**同步游标** —— 服务器给的 collection 时间戳。
 
-    下一次增量拉取拿它当 ``newer``。规则只有一条：**只有一次完整的拉取成功了才推进它**。
-    中途退避、被改、条数对不上，游标原地不动 —— 否则那段窗口里的变更就永远丢了。
+    下一次增量拉取拿它当 ``newer``。**推进只走 :meth:`Store.commit`** ——
+    「记录写全 ⇒ 游标可进；中途失败 ⇒ 全不动」由那一处的同一事务撑着，
+    调用点别另开写入路径（推理也只写在 commit 的 docstring 里）。
 
     ⚠️ **游标不是行号，别挂到 ``sync_records.id`` 上。** 那个自增主键在"删了重插"之后
     会从 1 重排（实测过），拿它当游标会静默漏数据。
@@ -131,6 +133,18 @@ class CollectionBatch:
     """``True`` = 整体替换（全量拉取）；``False`` = 增量 upsert。"""
 
 
+@dataclass(frozen=True, slots=True)
+class TargetCursor:
+    """这次 commit 要把哪个 collection 的游标写成什么。"""
+
+    collection: str
+    last_modified: float
+    synced_at: float
+    records: int | None = None
+    """``None`` = 写完 records 后由 commit 按库内实际条数现算（sync 用 ——
+    拉完才知道库里有多少）；显式值原样写（import 搬便携文件里那份计数）。"""
+
+
 def _translate_sqlite_error(path: str, exc: sqlite3.Error) -> ConfigurationError:
     """sqlite 错误 → ``ConfigurationError`` —— 与 places/portable 同款收敛。"""
     msg = f"{path} 读不了（{exc}）—— 本地库损坏或不是 SQLite 文件"
@@ -189,17 +203,63 @@ class Store:
             await self._run(table.insert(*rows[start : start + _INSERT_CHUNK]))
 
     @_guard_store
-    async def store_batches(self, batches: Sequence[CollectionBatch]) -> dict[str, ApplyResult]:
-        """**一次事务**里写入多个 collection —— 要么全成，要么一个字节都不写。
+    async def commit(
+        self,
+        batches: Sequence[CollectionBatch],
+        cursors: Sequence[TargetCursor],
+    ) -> dict[str, ApplyResult]:
+        """**一次事务**写入 records 并推进游标 —— 要么全成，要么一个字节都不写。
 
-        为什么要一次事务：``history`` 写进去了、``crypto/keys`` 没写进去，
-        库就处于"有数据但解不开"的半截状态 —— 那比什么都没有更让人困惑。
+        「记录写全 ⇒ 游标可进；中途失败 ⇒ 全不动」的**唯一实现处**：
+        sync 的 fetch-then-commit 与 import 的「游标只前进」（先过滤、再交进来）
+        都从这里过 —— 先写 records 还是先动游标这个顺序知识只在本方法内，
+        调用方拿到的接口就是这一步。
+
+        为什么要一次事务：``history`` 写进去了、``crypto/keys`` 或游标没写进去，
+        库就处于"有数据但解不开"或"数据新了、增量起点还是旧的"半截状态 ——
+        那比什么都没有更让人困惑。
+
+        ``records`` 为 ``None`` 的目标游标在**写完 batches 之后**按库内实际条数现算
+        （同事务内读，就是这次落盘后的真实条数）。
         """
         results: dict[str, ApplyResult] = {}
         async with self._engine.transaction():
             for batch in batches:
                 results[batch.collection] = await self._write_one(batch)
+            for target in cursors:
+                records = target.records
+                if records is None:
+                    records = await self._run(
+                        SyncRecord.count().where(SyncRecord.collection == target.collection)
+                    )
+                await self._write_cursor(
+                    target.collection,
+                    last_modified=target.last_modified,
+                    synced_at=target.synced_at,
+                    records=records,
+                )
         return results
+
+    async def _write_cursor(
+        self,
+        collection: str,
+        *,
+        last_modified: float,
+        synced_at: float,
+        records: int,
+    ) -> None:
+        """把一个 collection 的游标写成给定值。**调用方（只有 :meth:`commit`）负责事务。**"""
+        await self._run(SyncCursor.delete().where(SyncCursor.collection == collection))
+        await self._run(
+            SyncCursor.insert(
+                SyncCursor(
+                    collection=collection,
+                    last_modified=last_modified,
+                    synced_at=synced_at,
+                    records=records,
+                )
+            )
+        )
 
     async def _write_one(self, batch: CollectionBatch) -> ApplyResult:
         """写一个 collection。**调用方负责事务。**"""
@@ -287,8 +347,9 @@ class Store:
 
     async def replace_collection(self, collection: str, records: Sequence[EncryptedBso]) -> int:
         """用这一批记录整体替换**一个** collection，返回这次落进去多少条（新插 + 覆盖）。"""
-        result = await self.store_batches(
-            [CollectionBatch(collection=collection, records=records, full=True)]
+        result = await self.commit(
+            [CollectionBatch(collection=collection, records=records, full=True)],
+            (),
         )
         applied = result[collection]
         return applied.inserted + applied.updated
@@ -310,29 +371,6 @@ class Store:
         return float(value)
 
     @_guard_store
-    async def save_cursor(
-        self,
-        collection: str,
-        *,
-        last_modified: float,
-        synced_at: float,
-        records: int,
-    ) -> None:
-        """推进游标。**只在一次完整拉取成功之后调**。"""
-        async with self._engine.transaction():
-            await self._run(SyncCursor.delete().where(SyncCursor.collection == collection))
-            await self._run(
-                SyncCursor.insert(
-                    SyncCursor(
-                        collection=collection,
-                        last_modified=last_modified,
-                        synced_at=synced_at,
-                        records=records,
-                    )
-                )
-            )
-
-    @_guard_store
     async def load_records(self, collection: str) -> list[tuple[str, str | None]]:
         """读一个 collection 的 ``(record_id, payload)``。"""
         rows = await self._run(
@@ -341,11 +379,6 @@ class Store:
             )
         )
         return [(str(row["record_id"]), row["payload"]) for row in rows]
-
-    @_guard_store
-    async def count_records(self, collection: str) -> int:
-        """库里这个 collection 现在有多少条。"""
-        return await self._run(SyncRecord.count().where(SyncRecord.collection == collection))
 
     @_guard_store
     async def load_cursors(self) -> tuple[CursorInfo, ...]:
@@ -529,24 +562,27 @@ class Store:
         )
 
     async def merge_sync_cursors(self, cursors: Sequence[PortableCursor]) -> int:
-        """推进游标，返回推进了几个。
+        """推进游标，返回推进了几个 —— **只往前推**，过滤后一次交给 :meth:`commit` 写入。
 
-        **只往前推。** 旧游标会把已经拉过的区间重拉一遍；更糟的是把"上次同步到哪儿"
+        旧游标会把已经拉过的区间重拉一遍；更糟的是把"上次同步到哪儿"
         这个判断依据改小 —— 那之后真正的增量就再也不会去拉了。
         """
-        advanced = 0
+        advanced: list[TargetCursor] = []
         for item in cursors:
             current = await self.load_cursor(item.collection)
             if current is not None and item.last_modified <= current:
                 continue
-            await self.save_cursor(
-                item.collection,
-                last_modified=item.last_modified,
-                synced_at=item.synced_at,
-                records=item.records,
+            advanced.append(
+                TargetCursor(
+                    collection=item.collection,
+                    last_modified=item.last_modified,
+                    synced_at=item.synced_at,
+                    records=item.records,
+                )
             )
-            advanced += 1
-        return advanced
+        if advanced:
+            await self.commit((), advanced)
+        return len(advanced)
 
 
 @dataclass(frozen=True, slots=True)
@@ -578,7 +614,7 @@ async def _run_on[T](engine: SQLiteEngine, query: Awaitable[T]) -> T:
     """把表绑到 ``engine``，然后立刻执行 ``query`` —— **每条查询都过这里**。
 
     为什么不是"每个 Store 方法绑一次"：绑定是进程级类属性，方法中途另一个 Store
-    一重绑，后面几条查询就进了别人的库（交错写路径 + ``store_batches`` 事务失护）。
+    一重绑，后面几条查询就进了别人的库（交错写路径 + ``commit`` 事务失护）。
 
     为什么这样绑就安全：piccolo 的 ``Query._run`` 在**进入协程的第一段同步代码里**
     就读 ``table._meta.db`` 捕获 engine，绑定和捕获之间没有 await 点 —— 单线程

@@ -103,8 +103,9 @@ async def test_export_carries_the_cloud_records_and_cursors(tmp_path: Path) -> N
     profile_with_firefox(home, [("https://a.example/", "A", micros(DAY), 1)])
     database = tmp_path / "ffinfo.sqlite"
     store = await open_database(database)
-    await store.store_batches(
+    await store.commit(
         [CollectionBatch(collection="history", records=[record("rec-1")], full=True)],
+        (),
     )
     await SyncCursor.insert(
         SyncCursor(collection="history", last_modified=42.5, synced_at=43.0, records=1)
@@ -124,8 +125,9 @@ async def test_export_does_not_touch_the_local_database(tmp_path: Path) -> None:
     profile_with_firefox(home, [("https://a.example/", "A", micros(DAY), 1)])
     database = tmp_path / "legacy.sqlite"
     store = await open_database(database)
-    await store.store_batches(
+    await store.commit(
         [CollectionBatch(collection="history", records=[record("a")], full=True)],
+        (),
     )
     connection = sqlite3.connect(database)
     connection.execute("DROP INDEX ux_sync_records_collection_record_id")
@@ -294,8 +296,9 @@ async def test_import_does_not_downgrade_newer_cloud_data(tmp_path: Path) -> Non
     )
     database = tmp_path / "db.sqlite"
     store = await open_database(database)
-    await store.store_batches(
+    await store.commit(
         [CollectionBatch(collection="history", records=[record("rec", modified=99.0)], full=True)],
+        (),
     )
     await SyncCursor.insert(
         SyncCursor(collection="history", last_modified=500.0, synced_at=501.0, records=1)
@@ -424,8 +427,9 @@ async def test_import_from_firefox_leaves_cloud_records_and_cursors_alone(tmp_pa
     profile_with_firefox(home, [("https://a.example/", "A", micros(DAY), 1)])
     database = tmp_path / "db.sqlite"
     store = await open_database(database)
-    await store.store_batches(
+    await store.commit(
         [CollectionBatch(collection="history", records=[record("rec")], full=True)],
+        (),
     )
     await SyncCursor.insert(
         SyncCursor(collection="history", last_modified=500.0, synced_at=501.0, records=1)

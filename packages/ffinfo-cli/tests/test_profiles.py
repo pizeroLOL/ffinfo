@@ -14,7 +14,7 @@ from typer.testing import CliRunner
 from ffinfo_cli.cli import app
 from ffinfo_cli.profiles import LocalPaths, build_report
 from ffinfo_cli.render import render
-from ffinfo_cli.store import open_database
+from ffinfo_cli.store import TargetCursor, open_database
 from support import build_places, host
 
 NOW = 1_789_320_612.0
@@ -83,7 +83,17 @@ async def test_collections_come_from_the_cursors(tmp_path: Path) -> None:
     paths = paths_for(tmp_path)
     paths.database.parent.mkdir(parents=True, exist_ok=True)
     store = await open_database(paths.database)
-    await store.save_cursor("history", last_modified=1_789_320_600.12, synced_at=NOW, records=4_921)
+    await store.commit(
+        (),
+        [
+            TargetCursor(
+                collection="history",
+                last_modified=1_789_320_600.12,
+                synced_at=NOW,
+                records=4_921,
+            )
+        ],
+    )
 
     report = await build_report(
         host=host(tmp_path / "home"),

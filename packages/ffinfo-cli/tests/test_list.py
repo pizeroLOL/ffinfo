@@ -38,6 +38,7 @@ from ffinfo_cli.render import render
 from ffinfo_cli.store import (
     CollectionBatch,
     StoredVisit,
+    TargetCursor,
     open_database,
 )
 from support import us_of as micros
@@ -198,7 +199,7 @@ async def build_db(
     if tabs is not None:
         batches.append(CollectionBatch(collection="tabs", records=tabs, full=True))
     store = await open_database(tmp_path / "db.sqlite")
-    await store.store_batches(batches)
+    await store.commit(batches, ())
 
 
 async def _run(
@@ -306,8 +307,16 @@ async def test_freshness_reflects_the_last_successful_sync(tmp_path: Path) -> No
     """同步过的话，"数据有多陈"要说得出来 —— 差一秒都对不上。"""
     await build_db(tmp_path, [history_record("rec")])
     store = await open_database(tmp_path / "db.sqlite")
-    await store.save_cursor(
-        "history", last_modified=1_789_320_600.0, synced_at=NOW - 3600, records=1
+    await store.commit(
+        (),
+        [
+            TargetCursor(
+                collection="history",
+                last_modified=1_789_320_600.0,
+                synced_at=NOW - 3600,
+                records=1,
+            )
+        ],
     )
 
     report = await run(tmp_path)
@@ -320,7 +329,10 @@ async def test_freshness_counts_only_the_listed_collection(tmp_path: Path) -> No
     """别拿书签的同步时间给历史充数 —— 各 collection 各论各的。"""
     await build_db(tmp_path, [history_record("rec")])
     store = await open_database(tmp_path / "db.sqlite")
-    await store.save_cursor("bookmarks", last_modified=1.0, synced_at=NOW - 60, records=0)
+    await store.commit(
+        (),
+        [TargetCursor(collection="bookmarks", last_modified=1.0, synced_at=NOW - 60, records=0)],
+    )
 
     report = await run(tmp_path)
 
@@ -376,8 +388,9 @@ async def test_everything_unreadable_means_the_wrong_account(tmp_path: Path) -> 
 async def test_missing_keys_record_says_what_to_do(tmp_path: Path) -> None:
     """库里没有 crypto/keys —— 得说清楚"先跑 sync"，而不是抛个 KeyError。"""
     store = await open_database(tmp_path / "db.sqlite")
-    await store.store_batches(
+    await store.commit(
         [CollectionBatch(collection="history", records=[history_record("rec")], full=True)],
+        (),
     )
 
     with pytest.raises(ConfigurationError, match="ffinfo-cli sync"):

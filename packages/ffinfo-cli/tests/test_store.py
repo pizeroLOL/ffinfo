@@ -18,10 +18,13 @@ from typing import cast
 
 import pytest
 
+from ffinfo.errors import ConfigurationError
 from ffinfo.storage import EncryptedBso
+from ffinfo_cli.portable import PortableCursor
 from ffinfo_cli.store import (
     CollectionBatch,
     SyncRecord,
+    TargetCursor,
     open_database,
 )
 
@@ -146,20 +149,22 @@ async def test_replace_collection_accepts_empty(tmp_path: Path) -> None:
 async def test_full_replace_reports_deleted_and_updated(tmp_path: Path) -> None:
     """``--full`` 的账要能对得上：agent 问"什么被删了"，答案不能永远是 0。"""
     store = await open_database(tmp_path / "db.sqlite")
-    await store.store_batches(
+    await store.commit(
         [
             CollectionBatch(
                 collection="history", records=[record("a"), record("b"), record("c")], full=True
             )
         ],
+        (),
     )
 
-    results = await store.store_batches(
+    results = await store.commit(
         [
             CollectionBatch(
                 collection="history", records=[record("b"), record("c"), record("d")], full=True
             )
         ],
+        (),
     )
 
     applied = results["history"]
@@ -173,7 +178,7 @@ async def test_duplicate_ids_in_one_batch_are_folded(tmp_path: Path) -> None:
     """同一批里同 id 出现两次 —— 只留最新的那条，库里不会出现两行。"""
     store = await open_database(tmp_path / "db.sqlite")
 
-    results = await store.store_batches(
+    results = await store.commit(
         [
             CollectionBatch(
                 collection="history",
@@ -181,6 +186,7 @@ async def test_duplicate_ids_in_one_batch_are_folded(tmp_path: Path) -> None:
                 full=False,
             )
         ],
+        (),
     )
 
     assert results["history"].inserted == 1
@@ -192,11 +198,12 @@ async def test_duplicate_ids_in_one_batch_are_folded(tmp_path: Path) -> None:
 async def test_incremental_ignores_an_older_record(tmp_path: Path) -> None:
     """变更集里混进旧的 —— 不许拿旧盖新。"""
     store = await open_database(tmp_path / "db.sqlite")
-    await store.store_batches(
+    await store.commit(
         [CollectionBatch(collection="history", records=[record("a", modified=5.0)], full=False)],
+        (),
     )
 
-    results = await store.store_batches(
+    results = await store.commit(
         [
             CollectionBatch(
                 collection="history",
@@ -204,6 +211,7 @@ async def test_incremental_ignores_an_older_record(tmp_path: Path) -> None:
                 full=False,
             )
         ],
+        (),
     )
 
     assert results["history"].updated == 0
@@ -452,12 +460,12 @@ class _FailsMidway:
         raise RuntimeError(msg)
 
 
-async def test_store_batches_rolls_back_when_a_later_batch_fails(tmp_path: Path) -> None:
+async def test_commit_rolls_back_records_when_a_later_batch_fails(tmp_path: Path) -> None:
     """**全成或全不写**：第二个 batch 炸了，第一个 batch 的字节也不许留下。"""
     store = await open_database(tmp_path / "db.sqlite")
 
     with pytest.raises(RuntimeError, match="磁盘满了"):
-        await store.store_batches(
+        await store.commit(
             [
                 CollectionBatch(collection="bookmarks", records=[record("keep")], full=True),
                 CollectionBatch(
@@ -466,21 +474,131 @@ async def test_store_batches_rolls_back_when_a_later_batch_fails(tmp_path: Path)
                     full=True,
                 ),
             ],
+            (),
         )
 
     assert await SyncRecord.count() == 0
 
 
+async def test_commit_advances_records_and_cursors_together(tmp_path: Path) -> None:
+    """已有旧游标 + 新 batches：commit 成功后 records 与游标**都**前进。"""
+    path = tmp_path / "db.sqlite"
+    store = await open_database(path)
+    await store.commit(
+        [CollectionBatch(collection="history", records=[record("old")], full=True)],
+        [TargetCursor(collection="history", last_modified=100.0, synced_at=1.0, records=1)],
+    )
+
+    results = await store.commit(
+        [CollectionBatch(collection="history", records=[record("new")], full=True)],
+        [TargetCursor(collection="history", last_modified=200.0, synced_at=2.0)],
+    )
+
+    assert results["history"].inserted == 1
+    assert results["history"].deleted == 1  # old 没被重插 —— 对账口径照旧
+    assert _record_ids(path) == ["new"]
+    cursors = await store.load_cursors()
+    assert cursors[0].last_modified == 200.0
+    assert cursors[0].synced_at == 2.0
+    assert cursors[0].records == 1  # records=None → 按落盘后的实际条数现算
+
+
+async def test_commit_failure_midway_leaves_records_and_cursors_unchanged(tmp_path: Path) -> None:
+    """commit 中途抛错：已有 records 与已有游标**都**保持旧值 —— 同成同败。"""
+    path = tmp_path / "db.sqlite"
+    store = await open_database(path)
+    await store.commit(
+        [CollectionBatch(collection="history", records=[record("keep")], full=True)],
+        [TargetCursor(collection="history", last_modified=100.0, synced_at=1.0, records=1)],
+    )
+
+    with pytest.raises(RuntimeError, match="磁盘满了"):
+        await store.commit(
+            [
+                CollectionBatch(collection="bookmarks", records=[record("fresh")], full=True),
+                CollectionBatch(
+                    collection="history",
+                    records=cast(Sequence[EncryptedBso], _FailsMidway()),
+                    full=True,
+                ),
+            ],
+            [TargetCursor(collection="history", last_modified=200.0, synced_at=2.0)],
+        )
+
+    assert _record_ids(path) == ["keep"]  # 新字节回滚，旧记录还在
+    assert await store.load_cursor("history") == 100.0
+    assert await store.load_cursor("bookmarks") is None
+
+
+async def test_commit_failure_during_cursor_write_rolls_back_records_too(
+    tmp_path: Path,
+) -> None:
+    """records 已写、游标写到一半才炸 —— 两边都回到 commit 之前的旧值。
+
+    失败注入用 ``last_modified=NaN``：SQLite 把 NaN 存成 NULL，撞上
+    ``sync_cursors.last_modified`` 的 NOT NULL —— 位置正好在
+    「records 已写 + 第一个游标已写」之后，钉的是回滚的后半段。
+    """
+    path = tmp_path / "db.sqlite"
+    store = await open_database(path)
+    await store.commit(
+        [CollectionBatch(collection="history", records=[record("old")], full=True)],
+        [TargetCursor(collection="history", last_modified=100.0, synced_at=1.0, records=1)],
+    )
+
+    with pytest.raises(ConfigurationError):
+        await store.commit(
+            [CollectionBatch(collection="history", records=[record("new")], full=True)],
+            [
+                TargetCursor(collection="history", last_modified=200.0, synced_at=2.0, records=1),
+                TargetCursor(
+                    collection="bookmarks",
+                    last_modified=float("nan"),
+                    synced_at=2.0,
+                    records=0,
+                ),
+            ],
+        )
+
+    assert _record_ids(path) == ["old"]  # 已写的替换回滚
+    assert await store.load_cursor("history") == 100.0  # 已写的第一条游标也回滚
+    assert await store.load_cursor("bookmarks") is None
+
+
+async def test_merge_sync_cursors_only_moves_forward(tmp_path: Path) -> None:
+    """「游标只前进」直接在 store 上可验 —— 不必搭整条 export/import。"""
+    store = await open_database(tmp_path / "db.sqlite")
+
+    assert await store.merge_sync_cursors([cursor_at(500.0)]) == 1  # 没有 → 建立
+    assert await store.merge_sync_cursors([cursor_at(10.0)]) == 0  # 更旧 → 不动
+    assert await store.load_cursor("history") == 500.0
+    assert await store.merge_sync_cursors([cursor_at(600.0)]) == 1  # 更新 → 推进
+    assert await store.load_cursor("history") == 600.0
+
+
+def cursor_at(last_modified: float) -> PortableCursor:
+    """造一条便携文件形态的目标游标。"""
+    return PortableCursor(
+        collection="history",
+        last_modified=last_modified,
+        synced_at=last_modified + 1,
+        records=1,
+    )
+
+
 async def test_current_read_only_store_still_writes_when_tables_exist(tmp_path: Path) -> None:
     """表征：``read_only=True`` 只是跳过建表/迁移/收敛 —— **不是连接级只读**。
 
-    对已有表的库，``save_cursor`` 照样写入。export 的只读保证完全靠"恰好只调了 load_*"。
+    对已有表的库，``commit`` 照样写入。export 的只读保证完全靠"恰好只调了 load_*"。
     """
     path = tmp_path / "db.sqlite"
     await open_database(path)  # 先建出表
     store = await open_database(path, read_only=True)
 
-    await store.save_cursor("history", last_modified=99.0, synced_at=1.0, records=1)
+    await store.commit(
+        (),
+        [TargetCursor(collection="history", last_modified=99.0, synced_at=1.0, records=1)],
+    )
 
     connection = sqlite3.connect(path)
     try:
@@ -505,16 +623,18 @@ async def test_interleaved_stores_write_rows_into_their_own_database(
 
     # A 开始写：绑到 a、进事务、在建连上挂起
     async def a_write() -> None:
-        await store_a.store_batches(
-            [CollectionBatch(collection="history", records=[record("from-a")], full=False)]
+        await store_a.commit(
+            [CollectionBatch(collection="history", records=[record("from-a")], full=False)],
+            (),
         )
 
     task_a = asyncio.create_task(a_write())
     await asyncio.sleep(0)
 
     # B 在 A 的交错窗口里完成整段写 —— 旧实现会把表绑到 b
-    await store_b.store_batches(
-        [CollectionBatch(collection="history", records=[record("from-b")], full=False)]
+    await store_b.commit(
+        [CollectionBatch(collection="history", records=[record("from-b")], full=False)],
+        (),
     )
 
     # A 继续写完 —— 行必须还在 a，且不在 b
@@ -524,8 +644,8 @@ async def test_interleaved_stores_write_rows_into_their_own_database(
     assert _record_ids(path_b) == ["from-b"]
 
 
-async def test_interleaved_store_batches_still_rolls_back(tmp_path: Path) -> None:
-    """交错下 ``store_batches`` 的「全成或全不写」仍成立：A 中途炸，A 的字节不留、
+async def test_interleaved_commits_still_rolls_back(tmp_path: Path) -> None:
+    """交错下 ``commit`` 的「全成或全不写」仍成立：A 中途炸，A 的字节不留、
     也不许漏进 B 的库。"""
     path_a = tmp_path / "a.sqlite"
     path_b = tmp_path / "b.sqlite"
@@ -534,7 +654,7 @@ async def test_interleaved_store_batches_still_rolls_back(tmp_path: Path) -> Non
 
     async def a_fails_midway() -> None:
         with pytest.raises(RuntimeError, match="磁盘满了"):
-            await store_a.store_batches(
+            await store_a.commit(
                 [
                     CollectionBatch(collection="bookmarks", records=[record("keep")], full=True),
                     CollectionBatch(
@@ -542,13 +662,15 @@ async def test_interleaved_store_batches_still_rolls_back(tmp_path: Path) -> Non
                         records=cast(Sequence[EncryptedBso], _FailsMidway()),
                         full=True,
                     ),
-                ]
+                ],
+                (),
             )
 
     task_a = asyncio.create_task(a_fails_midway())
     await asyncio.sleep(0)
-    await store_b.store_batches(
-        [CollectionBatch(collection="history", records=[record("from-b")], full=False)]
+    await store_b.commit(
+        [CollectionBatch(collection="history", records=[record("from-b")], full=False)],
+        (),
     )
     await task_a
 

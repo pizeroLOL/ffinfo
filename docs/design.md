@@ -357,7 +357,8 @@ firefox 源是空的（目标机器没导入过）就自然降级成单源。**�
 
 导入时三样东西各按各的规矩合并：firefox 访问按 `(机器, url, 时刻)` 认（重复导入幂等；
 **标题变了算 `visits_updated`**，不冒充插入/跳过）；云端记录**只在导出的那条更新时才覆盖**
-（不拿旧数据盖新数据）；游标**只往前推**。`ImportReport.format_version` **3** 带
+（不拿旧数据盖新数据）；游标**只往前推**（过滤后与 sync 共用 `Store.commit` 写入）。
+`ImportReport.format_version` **3** 带
 `visits_updated`，满足 `inserted + updated + skipped == 输入条数`。
 批量插入一律**分块**（每批 100 行）—— piccolo 把整批拼成一条多值 `INSERT`，
 真实历史一次上万条会撞上 SQLite 的变量数上限（`too many SQL variables`）。
@@ -623,10 +624,11 @@ dispatcher（改为 `run_history` / `run_bookmarks` / `run_tabs` 与对应 `list
 `protocol: {"crypto": 1}`，**不进** `collections` 明细 —— `collections` 是"用户要什么"，
 `protocol` 是"协议需要什么"。没有它，库里记录一条也解不开。
 
-**原子性 —— 一次事务全成**：先把 `crypto` + 三个 collection 全部拉下来，再用现有的 `store_batches`
-（本就支持多 collection 一次事务）一次写入；任一失败 → 全回滚、游标全不动、报告不产出。
-「拉全了才写库」的忠实延伸是"三项拉全才写"。代价：`tabs` 失败会连累 `history` 重拉一次增量 ——
-增量本身便宜，且不会写坏数据。
+**原子性 —— 一次事务全成**：先把 `crypto` + 三个 collection 全部拉下来，再经 `Store.commit`
+一次写入 —— batches 与各自目标游标**同一事务**；任一失败 → 全回滚、游标全不动、报告不产出。
+`run_sync` 因此退化为 fetch-then-commit，不编排"先写 records、再动游标"的顺序；
+import 的「游标只前进」过滤后也走同一个 commit。代价：`tabs` 失败会连累 `history` 重拉一次
+增量 —— 增量本身便宜，且不会写坏数据。
 
 **报告形状**：`format_version` **2**。顶层 `SyncReport` 持 `collections: [CollectedSync]`，每项：
 `collection` / `mode` / `records` / `inserted` / `updated` / `deleted` / `pages` / `tombstones` /
