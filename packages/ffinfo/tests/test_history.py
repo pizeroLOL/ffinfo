@@ -200,3 +200,15 @@ def test_empty_input_is_fine() -> None:
 
     assert report.entries == ()
     assert report.records == 0
+
+
+def test_out_of_range_visit_date_skips_that_record_only() -> None:
+    """超范围 ``date`` 只跳过该条：好记录照常返回，坏记录进 ``skipped``。"""
+    good = encrypt(record_json(record_id="good"))
+    bad = encrypt(record_json(record_id="bad", visits=[{"date": 10**18, "type": 1}]))
+
+    report = decrypt_history([("good", good), ("bad", bad)], KEY)
+
+    assert [entry.record_id for entry in report.entries] == ["good"]
+    assert [record_id for record_id, _ in report.skipped] == ["bad"]
+    assert "时间戳" in report.skipped[0][1]

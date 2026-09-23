@@ -93,15 +93,39 @@ def test_encrypt_uses_fresh_iv_when_not_given() -> None:
 def test_tampered_ciphertext_fails_hmac() -> None:
     tampered = AES.ciphertext_b64[:-4] + ("AAAA" if AES.ciphertext_b64[-4:] != "AAAA" else "BBBB")
 
-    with pytest.raises(DecryptionError):
+    with pytest.raises(DecryptionError) as excinfo:
         _official_bundle().decrypt(tampered, AES.iv_b64, AES.hmac_hex)
+
+    assert str(excinfo.value) == "HMAC 校验失败：记录被篡改，或密钥不对"
 
 
 def test_tampered_hmac_is_rejected() -> None:
     flipped = AES.hmac_hex[:-1] + ("0" if AES.hmac_hex[-1] != "0" else "1")
 
-    with pytest.raises(DecryptionError):
+    with pytest.raises(DecryptionError) as excinfo:
         _official_bundle().decrypt(AES.ciphertext_b64, AES.iv_b64, flipped)
+
+    assert str(excinfo.value) == "HMAC 校验失败：记录被篡改，或密钥不对"
+
+
+def test_current_tampered_iv_still_passes_hmac() -> None:
+    """表征：HMAC 只签密文串、**不覆盖 IV** —— 改 IV 照样过防篡改检查。
+
+    CBC 首块明文 = P0 ⊕ IV ⊕ IV'，攻击者改服务器 payload 里的 IV 即可改写首 16 字节。
+    MAC 通过后才在解密/UTF-8 处失败，且失败消息现在点名「IV 可能被篡改」。
+    """
+    original = base64.b64decode(AES.iv_b64)
+    tampered_iv = bytes([original[0] ^ 0xFF]) + original[1:]
+    tampered_iv_b64 = base64.b64encode(tampered_iv).decode("ascii")
+
+    with pytest.raises(DecryptionError) as excinfo:
+        _official_bundle().decrypt(AES.ciphertext_b64, tampered_iv_b64, AES.hmac_hex)
+
+    message = str(excinfo.value)
+    # 不是 MAC 失败的那条文案 —— MAC 没拦下 IV 篡改（协议如此）
+    assert "HMAC 校验失败" not in message
+    # 失败点名 IV：IV 不在 MAC 覆盖内
+    assert "IV" in message
 
 
 @pytest.mark.parametrize("bad_hmac", ["", "zz", "00", "not-hex", "b1 e6"])

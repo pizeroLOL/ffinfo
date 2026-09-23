@@ -241,6 +241,22 @@ def test_normalized_request_uses_explicit_port() -> None:
     assert "\nlocalhost\n8080\n" in normalized
 
 
+def test_non_ascii_token_key_raises_sync_protocol_error() -> None:
+    """非 ASCII ``key`` → ``SyncProtocolError``，不再逃出裸 ``UnicodeEncodeError``。
+
+    ``key`` 是服务端可控输入；畸形响应必须落在 ``FfinfoError`` 异常层次里。
+    """
+    from ffinfo.errors import FfinfoError
+    from ffinfo.storage import TokenserverToken
+
+    token = TokenserverToken(id="id", key="ключ", api_endpoint="https://sync.test/")
+
+    with pytest.raises(SyncProtocolError, match="token 响应不合预期") as excinfo:
+        token.hawk_credentials()
+
+    assert isinstance(excinfo.value, FfinfoError)
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [

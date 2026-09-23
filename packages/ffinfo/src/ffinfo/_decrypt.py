@@ -21,7 +21,8 @@ from typing import Final
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from ffinfo.crypto import EncryptedPayload, KeyBundle
-from ffinfo.errors import DecryptionError
+from ffinfo.errors import DecryptionError, TimestampError
+from ffinfo.timestamps import failure_reason
 
 __all__ = ["DecryptBatch", "decrypt_records", "single"]
 
@@ -91,7 +92,14 @@ def decrypt_records[ModelT: BaseModel, ItemT](
         except ValidationError as exc:
             skipped.append((record_id, _reason(exc, what)))
             continue
-        items.extend(expand(record, record_id))
+        # 展开阶段才会碰到时间戳换算（历史的 visited_at、标签页的 last_used_at）——
+        # 坏时间戳只丢这一条，同批其余照常。裸 ValueError/OSError 是兜底：
+        # 正常路径已在 timestamps 里折成 TimestampError。
+        try:
+            items.extend(expand(record, record_id))
+        except (TimestampError, ValueError, OSError, OverflowError) as exc:
+            skipped.append((record_id, failure_reason(exc)))
+            continue
 
     return DecryptBatch(
         items=tuple(items), skipped=tuple(skipped), tombstones=tombstones, records=seen

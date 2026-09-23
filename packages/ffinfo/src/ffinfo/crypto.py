@@ -8,6 +8,10 @@
 1. 密钥对是 **enc_key(32B) + hmac_key(32B)**，由 64 字节的 kSync 直接切分（前 32 / 后 32）。
 2. 记录用 **AES-256-CBC + PKCS#7** 加密，IV 每条随机 16 字节。
 3. HMAC-SHA256 **算在 base64 之后的密文字符串上**，不是算在原始密文字节上。
+   **IV 不在 MAC 覆盖内** —— 篡改 payload 里的 IV 照样通过 HMAC 校验，却能把
+   CBC 首块明文改写成 ``P0 ⊕ IV ⊕ IV'``（恰好 16 字节）。因此 HMAC **通过之后**的
+   AES（长度/填充）失败与 UTF-8 解码失败，错误消息都会点名
+   「IV 可能被篡改（IV 不在 MAC 覆盖内）」；HMAC 本身失败则不提 IV。
 
 本模块只向 ``cryptography`` 借 AES-CBC 与 PKCS#7 padding；HMAC 走标准库，
 以便用 :func:`hmac.compare_digest` 做常数时间比较。
@@ -90,6 +94,12 @@ class KeyBundle:
     def decrypt(self, ciphertext_b64: str, iv_b64: str, hmac_hex: str) -> str:
         """校验 HMAC 后解密，返回明文。
 
+        HMAC **只签 ``ciphertext_b64`` 这个 base64 密文字符串**，IV 不在 MAC 覆盖内：
+        改 IV 能通过 HMAC 校验，但 CBC 首块明文会被改写（``P0 ⊕ IV ⊕ IV'``，16 字节）。
+        所以 MAC 通过之后的 AES（长度/填充）失败或 UTF-8 解码失败，错误消息都点名
+        「IV 可能被篡改（IV 不在 MAC 覆盖内）」；HMAC 本身失败则保持原有
+        「记录被篡改，或密钥不对」文案，不提 IV。
+
         HMAC 不过就**绝不**解密 —— 任何异常都收敛成 :class:`~ffinfo.errors.DecryptionError`。
         """
         ciphertext = record_b64(ciphertext_b64, "ciphertext")
@@ -100,11 +110,21 @@ class KeyBundle:
             msg = "HMAC 校验失败：记录被篡改，或密钥不对"
             raise DecryptionError(msg)
 
-        cleartext = self._aes_decrypt(ciphertext, iv)
+        try:
+            cleartext = self._aes_decrypt(ciphertext, iv)
+        except DecryptionError as exc:
+            msg = (
+                "HMAC 已通过但 AES 解密失败：IV 可能被篡改"
+                "（IV 不在 MAC 覆盖内），或密文长度/填充非法"
+            )
+            raise DecryptionError(msg) from exc
         try:
             return cleartext.decode("utf-8")
         except UnicodeDecodeError as exc:
-            msg = "解密结果不是合法的 UTF-8"
+            msg = (
+                "HMAC 已通过但解密结果不是合法的 UTF-8："
+                "IV 可能被篡改（IV 不在 MAC 覆盖内），首 16 字节明文被改写"
+            )
             raise DecryptionError(msg) from exc
 
     def encrypt(self, cleartext: str, *, iv: bytes | None = None) -> tuple[str, str, str]:

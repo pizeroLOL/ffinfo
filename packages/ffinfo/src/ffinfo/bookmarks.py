@@ -33,7 +33,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ffinfo._decrypt import decrypt_records, single
 from ffinfo.crypto import KeyBundle
-from ffinfo.timestamps import from_milliseconds
+from ffinfo.errors import TimestampError
+from ffinfo.timestamps import failure_reason, from_milliseconds
 
 __all__ = [
     "BookmarkNode",
@@ -156,9 +157,16 @@ def build_tree(records: Iterable[BookmarkRecord]) -> TreeResult:
     nodes: dict[str, BookmarkNode] = {}
     dropped: list[tuple[str, str]] = []
     for record in materialized:
+        # 建节点才会碰到 added_at 的时间戳换算 —— 坏时间戳只丢这一条。
+        # 裸 ValueError/OSError 是兜底：正常路径已在 timestamps 里折成 TimestampError。
+        try:
+            node = _node(record)
+        except (TimestampError, ValueError, OSError, OverflowError) as exc:
+            dropped.append((record.id, failure_reason(exc)))
+            continue
         if record.id in nodes:
             dropped.append((record.id, _DUPLICATE_REASON))
-        nodes[record.id] = _node(record)
+        nodes[record.id] = node
 
     parent_of: dict[str, str] = {}
     for node in nodes.values():

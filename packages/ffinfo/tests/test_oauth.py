@@ -23,7 +23,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from ffinfo.credentials import AgeIdentity, CredentialStore
-from ffinfo.errors import AuthError
+from ffinfo.errors import AuthError, FfinfoError
 from ffinfo.jwe import EphemeralKeyPair
 from ffinfo.keys import OLD_SYNC_SCOPE
 from ffinfo.oauth import (
@@ -68,6 +68,38 @@ def test_generated_verifier_is_within_rfc7636_length() -> None:
 
 def test_generated_pkce_pairs_are_unique() -> None:
     assert PkcePair.generate().verifier != PkcePair.generate().verifier
+
+
+def test_non_ascii_verifier_raises_auth_error() -> None:
+    """非 ASCII 且长度合法的 verifier → AuthError，不再逃出 FfinfoError 异常层次。
+
+    覆盖 RFC 7636 §4.1 字符集校验：`UnicodeEncodeError` 是 `ValueError` 子类但
+    **不是** `FfinfoError` —— 「调用方可以只捕获 FfinfoError」对这种输入必须成立。
+    """
+    verifier = "é" * 50  # 长度合法（43–128），字符集不合法
+
+    with pytest.raises(AuthError) as excinfo:
+        PkcePair.from_verifier(verifier)
+
+    assert isinstance(excinfo.value, FfinfoError)
+    assert "RFC 7636" in str(excinfo.value)
+    assert "generate" in str(excinfo.value)  # 消息里有照着做的出路
+
+
+@pytest.mark.parametrize("bad_char", [" ", "!", "+", "/", "%", "\t"])
+def test_invalid_ascii_charset_verifier_is_refused(bad_char: str) -> None:
+    """ASCII 但不在 [A-Za-z0-9-._~] 里的字符同样拒绝 —— 不只是非 ASCII。"""
+    verifier = ("a" * 42) + bad_char  # 长度合法，单个集外字符
+
+    with pytest.raises(AuthError):
+        PkcePair.from_verifier(verifier)
+
+
+@pytest.mark.parametrize("length", [0, 42, 129, 200])
+def test_out_of_range_verifier_length_is_auth_error(length: int) -> None:
+    """长度越界仍然是 AuthError —— 与字符集校验同居一个异常层次。"""
+    with pytest.raises(AuthError):
+        PkcePair.from_verifier("a" * length)
 
 
 def test_authorization_url_carries_everything_mozilla_needs() -> None:

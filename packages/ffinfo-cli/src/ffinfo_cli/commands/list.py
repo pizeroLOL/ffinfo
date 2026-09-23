@@ -28,10 +28,12 @@ from ffinfo_cli.list import (
 from ffinfo_cli.paths import credentials_path, database_path, identity_path
 from ffinfo_cli.render import render
 
+# 缺子命令走 UsageError（"Missing command."）进失败契约 —— 不能用 no_args_is_help：
+# NoArgsIsHelpError 构造时 ctx.get_help() 会把 help 打到 stdout（rich 副作用），
+# 而失败契约要求 stdout 为空。
 list_app = typer.Typer(
     name="list",
     help="查询库里的浏览数据。纯本地，不联网；默认人读，-j 输出 JSON。",
-    no_args_is_help=True,
 )
 
 

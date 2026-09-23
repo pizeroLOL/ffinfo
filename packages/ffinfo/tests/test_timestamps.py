@@ -5,8 +5,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta, timezone
 
+import pytest
+
+from ffinfo.errors import ConfigurationError, FfinfoError, TimestampError
 from ffinfo.timestamps import (
     from_microseconds,
     from_milliseconds,
@@ -58,3 +62,43 @@ def test_to_microseconds_accepts_other_timezones() -> None:
     assert to_microseconds(moment.astimezone(timezone(timedelta(hours=8)))) == (
         EPOCH_SECONDS * 1_000_000
     )
+
+
+@pytest.mark.parametrize("tz_name", ["Asia/Shanghai", "UTC"])
+def test_naive_datetime_is_rejected_regardless_of_local_timezone(
+    monkeypatch: pytest.MonkeyPatch, tz_name: str
+) -> None:
+    """翻转前：naive 按**机器本地时区**解释 —— 同一个值在 ``TZ=Asia/Shanghai`` 下
+    与 aware UTC 版差 8 小时（28_800_000_000 微秒），双源合并的键随机器漂。
+
+    现在：naive **稳定拒绝**（``ConfigurationError``），aware 结果也不随 ``TZ`` 漂 ——
+    两种 ``TZ`` 下同一输入得到同一输出。
+    """
+    import time
+
+    monkeypatch.setenv("TZ", tz_name)
+    time.tzset()
+    try:
+        naive = datetime(2023, 11, 14, 22, 13, 20)
+        with pytest.raises(ConfigurationError, match="时区"):
+            to_microseconds(naive)
+
+        aware = naive.replace(tzinfo=UTC)
+        assert to_microseconds(aware) == EPOCH_SECONDS * 1_000_000
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
+@pytest.mark.parametrize(
+    "convert",
+    [from_microseconds, from_milliseconds, from_seconds],
+    ids=["microseconds", "milliseconds", "seconds"],
+)
+def test_out_of_range_value_raises_timestamp_error(convert: Callable[[int], datetime]) -> None:
+    """超范围值抛的是 ``TimestampError``（``FfinfoError`` 子类），不是裸 ``ValueError``。"""
+    with pytest.raises(TimestampError) as excinfo:
+        convert(10**18)
+
+    assert isinstance(excinfo.value, FfinfoError)
+    assert not isinstance(excinfo.value, ValueError)

@@ -111,8 +111,9 @@ class ImportReport(BaseModel):
 
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
 
-    format_version: int = 2
-    """**2**：加了 ``input``；``portable_path`` / ``exported_at`` 对 firefox 输入为 null。
+    format_version: int = 3
+    """**3**：加了 ``visits_updated`` —— 三计数恒等 ``inserted + updated + skipped == 输入``。
+    **2**：加了 ``input``；``portable_path`` / ``exported_at`` 对 firefox 输入为 null。
     **1**：只有便携文件这一种输入。"""
     input: ImportInputKind
     """这次用的是哪种输入：``portable``（便携文件）· ``firefox``（本机 places.sqlite）。"""
@@ -124,6 +125,8 @@ class ImportReport(BaseModel):
     exported_at: str | None = None
     """便携文件里记的导出时刻。``input`` 是 ``firefox`` 时为 null。"""
     visits_inserted: int
+    visits_updated: int
+    """同一次访问、标题变了 —— 落库时就地改了，不算插入也不算跳过。"""
     visits_skipped: int
     """已经有了、这次没动的。"""
     records_inserted: int
@@ -217,6 +220,7 @@ async def run_import(
             profile=portable.meta.profile,
             exported_at=portable.meta.exported_at,
             visits_inserted=visits.inserted,
+            visits_updated=visits.updated,
             visits_skipped=len(portable.visits) - visits.inserted - visits.updated,
             records_inserted=records.inserted,
             records_updated=records.updated,
@@ -234,6 +238,7 @@ async def run_import(
         machine=input.machine,
         profile=collected.profile.name,
         visits_inserted=visits.inserted,
+        visits_updated=visits.updated,
         visits_skipped=len(collected.visits) - visits.inserted - visits.updated,
         records_inserted=0,
         records_updated=0,

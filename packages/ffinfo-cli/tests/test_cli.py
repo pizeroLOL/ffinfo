@@ -370,6 +370,195 @@ def test_login_without_oldsync_keys_is_auth_exit_4(monkeypatch: pytest.MonkeyPat
     assert "oldsync" in error["message"]
 
 
+def _local_paths_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA"):
+        monkeypatch.setenv(name, str(tmp_path / name))
+
+
+def test_corrupt_database_is_configuration_exit_3(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """本地库损坏 → ``ConfigurationError`` → exit 3 + stderr 错误 JSON。
+
+    曾经 ``sqlite3.DatabaseError`` 不是 ``FfinfoError``、逃出 ``guard``：
+    exit 1、stderr 空，``-j`` 拿不到任何错误 JSON。现在与 places/portable
+    同款收敛进失败契约。
+    """
+    from ffinfo_cli.paths import database_path
+
+    _local_paths_env(tmp_path, monkeypatch)
+    database = database_path()
+    database.parent.mkdir(parents=True, exist_ok=True)
+    database.write_bytes(b"this is not a database........")
+
+    result = runner.invoke(app, ["-j", "list", "history"])
+
+    assert result.exit_code == 3
+    assert result.stdout == ""
+    error = json.loads(result.stderr)["error"]
+    assert error["code"] == "configuration"
+    assert "读不了" in error["message"]
+
+
+def test_corrupt_database_human_mode_says_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """人读模式同一场景：stderr 一行 ``错误：``、stdout 空、exit 3。"""
+    from ffinfo_cli.paths import database_path
+
+    _local_paths_env(tmp_path, monkeypatch)
+    database = database_path()
+    database.parent.mkdir(parents=True, exist_ok=True)
+    database.write_bytes(b"this is not a database........")
+
+    result = runner.invoke(app, ["list", "history"])
+
+    assert result.exit_code == 3
+    assert result.stdout == ""
+    assert result.stderr.startswith("错误：")
+
+
+def test_login_abort_is_failure_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    """登录时 Ctrl-C → ``Abort`` 进失败契约 —— exit **130**、stderr 错误 JSON。
+
+    退出码 130 取 POSIX ``128+SIGINT``，也与 Typer 自己对 ``KeyboardInterrupt``
+    的 ``Exit(130)`` 同一口径；``error.code`` 为 ``aborted``（README 表新增一档）。
+    ``click.Abort`` 与 ``typer.Abort`` 互不为子类 —— 这里钉前者（``typer.prompt``
+    抛的后者由 guard 同一 except 兜住）。
+    """
+    import click
+
+    def abort_login(**_kwargs: object) -> Credentials:
+        raise click.Abort()
+
+    monkeypatch.setattr("ffinfo_cli.commands.login.login_sync", abort_login)
+
+    result = runner.invoke(app, ["-j", "login"])
+
+    assert result.exit_code == 130
+    assert result.stdout == ""
+    error = json.loads(result.stderr)["error"]
+    assert error["code"] == "aborted"
+    assert "中断" in error["message"]
+    assert not isinstance(result.exception, click.Abort)
+
+
+def test_login_abort_is_human_error_line_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """人读模式同一场景：stderr 一行 ``错误：…``，stdout 无半截成功文案。"""
+    import click
+
+    def abort_login(**_kwargs: object) -> Credentials:
+        raise click.Abort()
+
+    monkeypatch.setattr("ffinfo_cli.commands.login.login_sync", abort_login)
+
+    result = runner.invoke(app, ["login"])
+
+    assert result.exit_code == 130
+    assert result.stdout == ""
+    assert result.stderr.startswith("错误：")
+    assert "登录成功" not in result.stdout
+
+
+def test_login_typer_abort_also_enters_the_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``typer.prompt`` 抛的是 ``typer.Abort``（与 ``click.Abort`` 不同类）—— 同档。"""
+    import typer as typer_mod
+
+    def abort_login(**_kwargs: object) -> Credentials:
+        raise typer_mod.Abort()
+
+    monkeypatch.setattr("ffinfo_cli.commands.login.login_sync", abort_login)
+
+    result = runner.invoke(app, ["-j", "login"])
+
+    assert result.exit_code == 130
+    assert json.loads(result.stderr)["error"]["code"] == "aborted"
+
+
+def test_j_list_without_subcommand_is_usage_error_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """子命令组缺子命令与根级缺命令同一形态：exit 2、stdout 空、stderr 错误。
+
+    ``-j`` 时是一行 usage JSON；人读时 stderr 以 ``错误：`` 开头。
+    根级 ``-j``（缺命令）对照不回归。
+    """
+    _local_paths_env(tmp_path, monkeypatch)
+
+    sub = runner.invoke(app, ["-j", "list"])
+    human = runner.invoke(app, ["list"])
+    root = runner.invoke(app, ["-j"])
+
+    assert sub.exit_code == 2
+    assert sub.stdout == ""
+    assert json.loads(sub.stderr)["error"]["code"] == "usage"
+
+    assert human.exit_code == 2
+    assert human.stdout == ""
+    assert human.stderr.startswith("错误：")
+
+    assert root.exit_code == 2
+    assert json.loads(root.stderr)["error"]["code"] == "usage"
+
+
+def _fake_successful_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    """把 ``login_sync`` 换成返回 oldsync 密钥的替身 —— 不联网、不落盘。"""
+    import base64
+
+    from ffinfo.keys import OLD_SYNC_SCOPE, ScopedKey
+
+    k_sync = base64.b64encode(bytes(range(64))).decode("ascii")
+    credentials = Credentials(
+        access_token="ACCESS-TOKEN",
+        scope=OLD_SYNC_SCOPE,
+        expires_at=9_999_999_999.0,
+        scoped_keys={
+            OLD_SYNC_SCOPE: ScopedKey(kty="oct", scope=OLD_SYNC_SCOPE, k=k_sync, kid="k1")
+        },
+    )
+
+    def fake_login(**_kwargs: object) -> Credentials:
+        return credentials
+
+    monkeypatch.setattr("ffinfo_cli.commands.login.login_sync", fake_login)
+
+
+def test_login_success_json_with_j(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``-j login`` 成功经 ``render`` 出纯 JSON —— exit 0、可 ``json.loads``。
+
+    曾经这里断言中文散文（表征「``render`` 不是唯一 seam」）：agent 按 README
+    「``-j`` 输出纯 JSON」parse 会拿到垃圾，且退出码 0 无从判错。
+    """
+    _fake_successful_login(monkeypatch)
+
+    result = runner.invoke(app, ["-j", "login"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["format_version"] == 1
+    assert payload["status"] == "success"
+    assert payload["credentials"].endswith("credentials.age")
+    assert payload["encryption_key_bytes"] == 32
+    assert payload["hmac_key_bytes"] == 32
+
+
+def test_login_success_human_mode_is_still_chinese_prose(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """人读 login 成功仍是中文散文（含「登录成功」），不是 JSON。"""
+    _fake_successful_login(monkeypatch)
+
+    result = runner.invoke(app, ["login"])
+
+    assert result.exit_code == 0
+    assert "登录成功" in result.stdout
+    assert "凭据已加密存到" in result.stdout
+    assert "32 字节" in result.stdout
+    assert not result.stdout.lstrip().startswith("{")
+
+
 @pytest.mark.parametrize(
     "argv",
     [

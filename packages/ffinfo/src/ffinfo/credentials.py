@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import stat
 from pathlib import Path
@@ -152,7 +153,10 @@ def _write_flags() -> int:
 def _write_private(path: Path, data: bytes, what: str) -> None:
     """以 0600 落盘。
 
-    ``os.open`` 的 mode 会被 umask 削，所以 ``fchmod`` 那一步不是多余的；
+    ``os.open`` 的 mode 只对**新建**文件生效，且会被 umask 削 —— 所以拿到 fd 之后、
+    **写入任何数据之前**先 ``fchmod`` 收紧：覆盖已有的宽权限（如 0644）文件时，
+    密文不会先进宽权限窗口；若 ``fchmod`` 失败，except 在 write 前退出，
+    磁盘上不留下「0644 + 新密钥」的组合（``O_TRUNC`` 已清空旧内容，新内容未写入）。
     Windows 没有 ``fchmod``，那边跳过 —— 不做假动作。
     """
     try:
@@ -162,14 +166,25 @@ def _write_private(path: Path, data: bytes, what: str) -> None:
         msg = f"写不了{what} {path}：{exc.strerror}"
         raise ConfigurationError(msg) from exc
     try:
-        os.write(fd, data)
         if hasattr(os, "fchmod"):
             os.fchmod(fd, _IDENTITY_MODE)
+        _write_all(fd, data)
     except OSError as exc:
         msg = f"写不了{what} {path}：{exc.strerror}"
         raise ConfigurationError(msg) from exc
     finally:
         os.close(fd)
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    """循环 ``os.write`` 直到全部落盘 —— 短写不静默截断。"""
+    view = memoryview(data)
+    while view:
+        written = os.write(fd, view)
+        if written == 0:
+            msg = "os.write 返回 0 字节，无法继续写入"
+            raise OSError(errno.EIO, msg)
+        view = view[written:]
 
 
 def _require_private_permissions(path: Path) -> None:

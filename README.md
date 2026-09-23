@@ -72,6 +72,7 @@ uv run ffinfo-cli import --from-firefox --profile <目录>   # 手动指定
 | 6 | `protocol` | Sync 协议层面出错 |
 | 7 | `decryption` | 记录解密失败 |
 | 8 | `key_derivation` | 密钥派生失败 |
+| 130 | `aborted` | 用户中断（Ctrl-C / 交互中途掐断）—— 命令未完成 |
 
 ```json
 {"error": {"code": "backoff", "message": "服务器要求退避，还需等待 60 秒（Retry-After）。库里没动任何东西。", "wait_seconds": 60.0, "soft": false}}

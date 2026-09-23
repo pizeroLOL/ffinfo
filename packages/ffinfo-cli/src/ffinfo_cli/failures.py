@@ -20,6 +20,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, Final, NoReturn
 
 import typer
+from click.exceptions import Abort as ClickAbort
 from typer.core import TyperGroup
 
 try:  # Typer 0.16+ 自带一份 click（``typer._click``）；老版本 Typer 直接复用 click 包
@@ -42,6 +43,7 @@ __all__ = [
     "emit_error",
     "error_payload",
     "fail",
+    "fail_abort",
     "fail_usage",
     "guard",
     "machine_from_argv",
@@ -116,6 +118,17 @@ def fail_usage(message: str) -> NoReturn:
     raise typer.Exit(code=2)
 
 
+def fail_abort(exc: BaseException) -> NoReturn:
+    """用户中断（Ctrl-C / 授权码接收被掐断）—— 退出码 130（POSIX 128+SIGINT）。
+
+    ``click.Abort`` 与 ``typer.Abort`` 是两个互不为子类的信号类（``typer.prompt``
+    抛后者），外加裸 ``KeyboardInterrupt`` —— 都归这一档。消息固定：中断不是
+    系统故障，异常本身通常不带可读文本。
+    """
+    emit_error({"error": {"code": "aborted", "message": "用户中断（Ctrl-C）——命令未完成。"}})
+    raise typer.Exit(code=130) from exc
+
+
 def machine_from_argv(argv: Sequence[str]) -> bool:
     """从原始 argv 里 best-effort 认出 ``-j`` / ``--json``。
 
@@ -178,7 +191,12 @@ class CliTyper(typer.Typer):
 
 
 def guard[ReportT](call: Callable[[], ReportT], *, backoff_note: str = "") -> ReportT:
-    """跑一次业务调用；失败就按契约翻译（分档退出码 + stderr 错误输出）。"""
+    """跑一次业务调用；失败就按契约翻译（分档退出码 + stderr 错误输出）。
+
+    用户中断也在这里接住 —— 交互路径（``typer.prompt`` 收授权码、登录中 Ctrl-C）
+    抛的 ``Abort`` / ``KeyboardInterrupt`` 不是 ``FfinfoError``，漏出去就是裸退出码
+    加空流，把失败契约凿穿。
+    """
     try:
         return call()
     except BackoffError as exc:
@@ -186,3 +204,5 @@ def guard[ReportT](call: Callable[[], ReportT], *, backoff_note: str = "") -> Re
         fail(exc, note=backoff_note)
     except FfinfoError as exc:
         fail(exc)
+    except (ClickAbort, typer.Abort, KeyboardInterrupt) as exc:
+        fail_abort(exc)

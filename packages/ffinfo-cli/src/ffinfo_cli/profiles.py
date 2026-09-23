@@ -23,6 +23,7 @@ from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict
 
+from ffinfo.errors import ConfigurationError
 from ffinfo_cli.paths import config_dir, credentials_path, data_dir, database_path, identity_path
 from ffinfo_cli.places import HostContext, discover_profiles, firefox_roots
 from ffinfo_cli.store import open_database
@@ -134,7 +135,7 @@ async def build_report(
                 )
                 for cursor in await store.load_cursors()
             ]
-        except (OSError, sqlite3.Error) as exc:
+        except (OSError, sqlite3.Error, ConfigurationError) as exc:
             db_note = f"本地库打不开：{exc}"
 
     return ProfilesReport(

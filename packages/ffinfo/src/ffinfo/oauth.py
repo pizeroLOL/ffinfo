@@ -70,6 +70,10 @@ _STATE_BYTES: Final = 32
 _PKCE_VERIFIER_BYTES: Final = 64
 _RFC7636_MIN_VERIFIER: Final = 43
 _RFC7636_MAX_VERIFIER: Final = 128
+_RFC7636_CHARSET: Final[frozenset[str]] = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+)
+"""RFC 7636 §4.1 允许的 verifier 字符集 —— RFC 3986 的 unreserved：``[A-Za-z0-9-._~]``。"""
 
 _ERROR_HINTS: Final[dict[str, str]] = {
     "invalid_grant": "授权码过期或被用过；刷新时出现说明 refresh token 也失效了 —— 重新授权一次",
@@ -118,11 +122,21 @@ class PkcePair:
 
     @classmethod
     def from_verifier(cls, verifier: str) -> Self:
-        """由既有 verifier 算出 challenge（``BASE64URL(SHA256(ASCII(verifier)))``）。"""
+        """由既有 verifier 算出 challenge（``BASE64URL(SHA256(ASCII(verifier)))``）。
+
+        verifier 须符合 RFC 7636 §4.1：长度 43–128，字符集 ``[A-Za-z0-9-._~]``。
+        违反任一条都是 :class:`AuthError` —— 不让裸编码异常逃出异常层次。
+        """
         if not _RFC7636_MIN_VERIFIER <= len(verifier) <= _RFC7636_MAX_VERIFIER:
             msg = (
                 f"PKCE verifier 的长度必须在 {_RFC7636_MIN_VERIFIER}–{_RFC7636_MAX_VERIFIER} "
                 f"之间，收到 {len(verifier)}"
+            )
+            raise AuthError(msg)
+        if not all(ch in _RFC7636_CHARSET for ch in verifier):
+            msg = (
+                "PKCE verifier 含 RFC 7636 §4.1 字符集 [A-Za-z0-9-._~] 之外的字符"
+                "（非 ASCII 或符号不对）—— 用 PkcePair.generate() 生成一个合法的"
             )
             raise AuthError(msg)
         digest = hashlib.sha256(verifier.encode("ascii")).digest()

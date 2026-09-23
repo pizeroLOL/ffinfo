@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from collections.abc import Iterator, Sequence
 from pathlib import Path
@@ -468,3 +469,97 @@ async def test_store_batches_rolls_back_when_a_later_batch_fails(tmp_path: Path)
         )
 
     assert await SyncRecord.count() == 0
+
+
+async def test_current_read_only_store_still_writes_when_tables_exist(tmp_path: Path) -> None:
+    """表征：``read_only=True`` 只是跳过建表/迁移/收敛 —— **不是连接级只读**。
+
+    对已有表的库，``save_cursor`` 照样写入。export 的只读保证完全靠"恰好只调了 load_*"。
+    """
+    path = tmp_path / "db.sqlite"
+    await open_database(path)  # 先建出表
+    store = await open_database(path, read_only=True)
+
+    await store.save_cursor("history", last_modified=99.0, synced_at=1.0, records=1)
+
+    connection = sqlite3.connect(path)
+    try:
+        rows = connection.execute("SELECT collection, last_modified FROM sync_cursors").fetchall()
+    finally:
+        connection.close()
+    assert rows == [("history", 99.0)]
+
+
+async def test_interleaved_stores_write_rows_into_their_own_database(
+    tmp_path: Path,
+) -> None:
+    """交错：A 写到一半、B 整段插队重绑 —— A 的行仍只落在 a。
+
+    旧实现把表绑在**进程级类属性**上且只在方法开头绑一次：A 进事务后 B 一重绑，
+    A 后续查询全进 B，且不受 A 自己的事务保护。
+    """
+    path_a = tmp_path / "a.sqlite"
+    path_b = tmp_path / "b.sqlite"
+    store_a = await open_database(path_a)
+    store_b = await open_database(path_b)
+
+    # A 开始写：绑到 a、进事务、在建连上挂起
+    async def a_write() -> None:
+        await store_a.store_batches(
+            [CollectionBatch(collection="history", records=[record("from-a")], full=False)]
+        )
+
+    task_a = asyncio.create_task(a_write())
+    await asyncio.sleep(0)
+
+    # B 在 A 的交错窗口里完成整段写 —— 旧实现会把表绑到 b
+    await store_b.store_batches(
+        [CollectionBatch(collection="history", records=[record("from-b")], full=False)]
+    )
+
+    # A 继续写完 —— 行必须还在 a，且不在 b
+    await task_a
+
+    assert _record_ids(path_a) == ["from-a"]
+    assert _record_ids(path_b) == ["from-b"]
+
+
+async def test_interleaved_store_batches_still_rolls_back(tmp_path: Path) -> None:
+    """交错下 ``store_batches`` 的「全成或全不写」仍成立：A 中途炸，A 的字节不留、
+    也不许漏进 B 的库。"""
+    path_a = tmp_path / "a.sqlite"
+    path_b = tmp_path / "b.sqlite"
+    store_a = await open_database(path_a)
+    store_b = await open_database(path_b)
+
+    async def a_fails_midway() -> None:
+        with pytest.raises(RuntimeError, match="磁盘满了"):
+            await store_a.store_batches(
+                [
+                    CollectionBatch(collection="bookmarks", records=[record("keep")], full=True),
+                    CollectionBatch(
+                        collection="history",
+                        records=cast(Sequence[EncryptedBso], _FailsMidway()),
+                        full=True,
+                    ),
+                ]
+            )
+
+    task_a = asyncio.create_task(a_fails_midway())
+    await asyncio.sleep(0)
+    await store_b.store_batches(
+        [CollectionBatch(collection="history", records=[record("from-b")], full=False)]
+    )
+    await task_a
+
+    assert _record_ids(path_a) == []  # A 全回滚
+    assert _record_ids(path_b) == ["from-b"]  # B 只有自己那行，没有 A 的 keep
+
+
+def _record_ids(path: Path) -> list[str]:
+    connection = sqlite3.connect(path)
+    try:
+        rows = connection.execute("SELECT record_id FROM sync_records ORDER BY id").fetchall()
+    finally:
+        connection.close()
+    return [str(row[0]) for row in rows]

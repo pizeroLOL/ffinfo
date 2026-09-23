@@ -179,3 +179,20 @@ def test_extra_fields_are_ignored() -> None:
     report = parse_tabs([("c", encrypt(cleartext))], KEY)
 
     assert report.clients[0].count == 0
+
+
+def test_out_of_range_last_used_skips_that_record_only() -> None:
+    """超范围 ``lastUsed`` 只跳过该条：好设备照常返回，坏记录进 ``skipped``。"""
+    good = encrypt(client_json("good"))
+    bad = encrypt(
+        client_json(
+            "bad",
+            tabs=[{"title": "T", "urlHistory": ["https://x.test/"], "lastUsed": 10**12}],
+        )
+    )
+
+    report = parse_tabs([("good", good), ("bad", bad)], KEY)
+
+    assert [client.client_id for client in report.clients] == ["good"]
+    assert [record_id for record_id, _ in report.skipped] == ["bad"]
+    assert "时间戳" in report.skipped[0][1]

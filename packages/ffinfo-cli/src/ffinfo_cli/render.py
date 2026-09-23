@@ -6,7 +6,7 @@ JSON / stderr 只有错误"这条契约在每个命令里重复一遍；默认�
 
 * ``machine=True`` —— 给 agent 的 JSON，形状与旧 ``to_json`` 逐字段一致
 * ``machine=False`` —— 给人读的排版：history 三列表格、bookmarks 缩进树、tabs 设备小标题、
-  其余 ``key: value`` 短摘要
+  login 中文散文、其余 ``key: value`` 短摘要
 
 人读时间用**注入的时区**（测试确定；不注入才用本机时区），宽度交给 ``rich``
 （``width`` 可注入）。JSON 仍是 UTC ISO —— agent 契约不动。
@@ -29,14 +29,15 @@ from ffinfo_cli.list.bookmarks import BookmarksReport
 from ffinfo_cli.list.history import HistoryReport
 from ffinfo_cli.list.report import ListReport
 from ffinfo_cli.list.tabs import TabsReport
+from ffinfo_cli.login import LoginReport
 from ffinfo_cli.profiles import FileInfo, ProfilesReport
 from ffinfo_cli.sync import SyncReport
 from ffinfo_cli.transfer import ExportReport, ImportReport
 
 __all__ = ["Report", "render"]
 
-type Report = ListReport | SyncReport | ExportReport | ImportReport | ProfilesReport
-"""五份能输出的报告 —— **封闭** union，pyright 能查 ``match`` 的穷尽性。"""
+type Report = ListReport | SyncReport | ExportReport | ImportReport | ProfilesReport | LoginReport
+"""六份能输出的报告 —— **封闭** union，pyright 能查 ``match`` 的穷尽性。"""
 
 
 def render(
@@ -64,6 +65,8 @@ def render(
             return _render_import(report)
         case ProfilesReport():
             return _render_profiles(report)
+        case LoginReport():
+            return _render_login(report)
         case _ as unreachable:
             assert_never(unreachable)
 
@@ -184,6 +187,7 @@ def _render_import(report: ImportReport) -> str:
             f"profile: {report.profile}",
             f"exported_at: {report.exported_at or '—'}",
             f"visits_inserted: {report.visits_inserted}",
+            f"visits_updated: {report.visits_updated}",
             f"visits_skipped: {report.visits_skipped}",
             f"records_inserted: {report.records_inserted}",
             f"records_updated: {report.records_updated}",
@@ -208,6 +212,15 @@ def _render_profiles(report: ProfilesReport) -> str:
             f"identity: {_file_info(report.identity)}",
         ]
     )
+
+
+def _render_login(report: LoginReport) -> str:
+    """登录成功的两行中文散文 —— 人读契约点名要「登录成功」（机器走上面的 JSON）。"""
+    headline = (
+        "登录成功 —— 同步密钥已就绪"
+        f"（{report.encryption_key_bytes} 字节加密密钥 + {report.hmac_key_bytes} 字节签名密钥）。"
+    )
+    return f"{headline}\n凭据已加密存到 {report.credentials}"
 
 
 def _file_info(info: FileInfo) -> str:

@@ -157,8 +157,16 @@ class TokenserverToken(BaseModel):
         ⚠️ 密钥是 ``key`` **字符串本身的字节**，不是 base64 解码后的字节 ——
         app-services 就是 ``Key::new(token.key.as_bytes(), SHA256)``。
         这里解错就是一路 401。
+
+        ``key`` 是服务端可控输入；非 ASCII 说明 token 响应不合预期 ——
+        收敛成 :class:`SyncProtocolError`，不放裸 ``UnicodeEncodeError`` 出去。
         """
-        return HawkCredentials(id=self.id, key=self.key.encode("ascii"))
+        try:
+            key = self.key.encode("ascii")
+        except UnicodeEncodeError as exc:
+            msg = "tokenserver 的 key 含非 ASCII 字符 —— token 响应不合预期"
+            raise SyncProtocolError(msg) from exc
+        return HawkCredentials(id=self.id, key=key)
 
 
 class EncryptedBso(BaseModel):

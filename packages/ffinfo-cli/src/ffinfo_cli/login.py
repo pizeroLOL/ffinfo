@@ -10,9 +10,11 @@ import asyncio
 import time
 import webbrowser
 from pathlib import Path
+from typing import ClassVar, Literal
 
 import httpx
 import typer
+from pydantic import BaseModel, ConfigDict
 
 from ffinfo.credentials import AgeIdentity, CredentialStore
 from ffinfo.errors import AuthError
@@ -28,6 +30,24 @@ from ffinfo.oauth import (
 )
 
 _HTTP_TIMEOUT_SECONDS: float = 30.0
+
+
+class LoginReport(BaseModel):
+    """一次 login 的结果 —— **成功才会有**，直接就是 ``-j login`` 的输出。
+
+    失败不走这份报告：失败在 ``failures.guard`` 里就变成 stderr 错误 JSON + 分档退出码。
+    """
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    format_version: int = 1
+    status: Literal["success"] = "success"
+    """成功语义 —— agent 不必只靠「exit 0 且能 parse」推断；失败是另一种形状（``error``）。"""
+    credentials: str
+    """加密凭据的落点 —— 后续 ``sync`` 用的就是这份文件。"""
+    encryption_key_bytes: int
+    hmac_key_bytes: int
+    """同步密钥已就绪的证据：两个 256 位密钥的字节数（当前都是 32）。"""
 
 
 class ConsoleCodeReceiver:

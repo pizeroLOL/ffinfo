@@ -26,6 +26,10 @@ class DecryptionError(FfinfoError):
     """记录解密失败（HMAC 校验不过、密文损坏等）。"""
 
 
+class TimestampError(FfinfoError):
+    """时间戳超出 ``datetime`` 可表示范围（损坏、单位混淆上溢等）。"""
+
+
 class SyncProtocolError(FfinfoError):
     """Sync 存储协议层面的错误（响应格式异常、节点重分配、拉取不完整等）。"""
 

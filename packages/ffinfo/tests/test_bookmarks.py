@@ -302,3 +302,15 @@ def test_extra_fields_are_ignored() -> None:
 def test_node_model_is_constructible_directly() -> None:
     node = BookmarkNode(id="a", type="folder", title="t")
     assert node.children == []
+
+
+def test_out_of_range_date_added_drops_that_record_only() -> None:
+    """超范围 ``dateAdded`` 只丢该条：好记录进树，坏记录进 ``dropped``。"""
+    good = encrypt(bookmark_json("good"))
+    bad = encrypt(bookmark_json("bad", date_added=10**15))
+
+    report = parse_bookmarks([("good", good), ("bad", bad)], KEY)
+
+    assert [node.id for node in report.roots] == ["good"]
+    assert [record_id for record_id, _ in report.dropped] == ["bad"]
+    assert "时间戳" in report.dropped[0][1]

@@ -20,16 +20,19 @@ firefox ``places.sqlite`` 来的走另一张表 —— 不硬凑成一张。
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+import sqlite3
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from functools import wraps
 from pathlib import Path
-from typing import Final
+from typing import Concatenate, Final
 
 from piccolo.columns import BigInt, DoublePrecision, Integer, Text, Varchar
 from piccolo.engine.sqlite import SQLiteEngine
 from piccolo.table import Table
 
+from ffinfo.errors import ConfigurationError
 from ffinfo.storage import EncryptedBso
 from ffinfo.timestamps import from_microseconds, to_microseconds
 from ffinfo_cli.portable import PortableCursor, PortableRecord
@@ -128,11 +131,42 @@ class CollectionBatch:
     """``True`` = 整体替换（全量拉取）；``False`` = 增量 upsert。"""
 
 
+def _translate_sqlite_error(path: str, exc: sqlite3.Error) -> ConfigurationError:
+    """sqlite 错误 → ``ConfigurationError`` —— 与 places/portable 同款收敛。"""
+    msg = f"{path} 读不了（{exc}）—— 本地库损坏或不是 SQLite 文件"
+    return ConfigurationError(msg)
+
+
+def _guard_store[**StoreParams, StoreResult](
+    method: Callable[Concatenate[Store, StoreParams], Awaitable[StoreResult]],
+) -> Callable[Concatenate[Store, StoreParams], Awaitable[StoreResult]]:
+    """Store 方法上的 ``sqlite3.Error`` → ``ConfigurationError``。
+
+    库损坏时第一发可能落在 :func:`open_database`，也可能落在之后的某次查询
+    （``read_only=True`` 开库不摸库）—— 方法这一层也接住，失败才进得了契约。
+    """
+
+    @wraps(method)
+    async def wrapper(
+        self: Store, *args: StoreParams.args, **kwargs: StoreParams.kwargs
+    ) -> StoreResult:
+        try:
+            return await method(self, *args, **kwargs)
+        except sqlite3.Error as exc:
+            # pyright 抱怨碰了 Store 的 _engine —— 这个 helper 就是为 Store 写的，路径只读
+            path = str(self._engine.path)  # pyright: ignore[reportPrivateUsage]
+            raise _translate_sqlite_error(path, exc) from exc
+
+    return wrapper
+
+
 class Store:
     """本地库的 adapter —— **piccolo 只在这个 module 里出现**。
 
-    构造走 :func:`open_database`。每个操作开始前把表绑到这把 engine 上 ——
-    piccolo 的表是类级单例，"绑哪个库"只能挂在类上，所以这一步集中在 :meth:`_bind`。
+    构造走 :func:`open_database`。piccolo 的表是类级单例，"绑哪个库"只能挂在类上；
+    绑定本身仍是进程级的，所以**每条查询**都过 :meth:`_run` 在执行前重绑一次 ——
+    「绑定 → ``Query._run`` 捕获 engine」之间没有 await 点，交错的 Store 偷不走
+    这一次的目标库（详见 :func:`_run_on`）。
     """
 
     __slots__: tuple[str, ...] = ("_engine",)
@@ -142,16 +176,25 @@ class Store:
         self._engine = engine
 
     def _bind(self) -> None:
-        """把表绑到这把 engine 上 —— 每个操作先调它，别让上一位调用方的绑定留下来。"""
+        """把表绑到这把 engine 上 —— 正常路径走 :meth:`_run`，别绕开它直接跑查询。"""
         _bind(self._engine)
 
+    async def _run[T](self, query: Awaitable[T]) -> T:
+        """重绑到本 Store 的 engine 后执行一条 piccolo 查询 / DDL。"""
+        return await _run_on(self._engine, query)
+
+    async def _insert_rows[T: Table](self, table: type[T], rows: Sequence[T]) -> None:
+        """分批 ``INSERT`` —— 绕过 SQLite 的变量数上限。空列表什么都不做。"""
+        for start in range(0, len(rows), _INSERT_CHUNK):
+            await self._run(table.insert(*rows[start : start + _INSERT_CHUNK]))
+
+    @_guard_store
     async def store_batches(self, batches: Sequence[CollectionBatch]) -> dict[str, ApplyResult]:
         """**一次事务**里写入多个 collection —— 要么全成，要么一个字节都不写。
 
         为什么要一次事务：``history`` 写进去了、``crypto/keys`` 没写进去，
         库就处于"有数据但解不开"的半截状态 —— 那比什么都没有更让人困惑。
         """
-        self._bind()
         results: dict[str, ApplyResult] = {}
         async with self._engine.transaction():
             for batch in batches:
@@ -177,13 +220,13 @@ class Store:
         after = {record.id for record in live}
         before = {
             str(row["record_id"])
-            for row in await SyncRecord.select(SyncRecord.record_id).where(
-                SyncRecord.collection == collection
+            for row in await self._run(
+                SyncRecord.select(SyncRecord.record_id).where(SyncRecord.collection == collection)
             )
         }
-        await SyncRecord.delete().where(SyncRecord.collection == collection)
+        await self._run(SyncRecord.delete().where(SyncRecord.collection == collection))
         if rows:
-            await _insert_rows(SyncRecord, rows)
+            await self._insert_rows(SyncRecord, rows)
         return ApplyResult(
             inserted=len(after - before),
             updated=len(after & before),
@@ -202,9 +245,11 @@ class Store:
         """
         existing = {
             str(row["record_id"]): (int(row["id"]), float(row["modified"]))
-            for row in await SyncRecord.select(
-                SyncRecord.id, SyncRecord.record_id, SyncRecord.modified
-            ).where(SyncRecord.collection == collection)
+            for row in await self._run(
+                SyncRecord.select(SyncRecord.id, SyncRecord.record_id, SyncRecord.modified).where(
+                    SyncRecord.collection == collection
+                )
+            )
         }
 
         fresh: list[SyncRecord] = []
@@ -221,20 +266,22 @@ class Store:
                 updates.append((entry[0], record))
 
         if fresh:
-            await _insert_rows(SyncRecord, fresh)
+            await self._insert_rows(SyncRecord, fresh)
         # 逐行 UPDATE 是有意的取舍：增量里真正"变了的"通常是个位数，一条条写最直白；
         # 拼一条 CASE 批量得先证明它值得 —— 现在不值。
         for row_id, record in updates:
-            await SyncRecord.update(
-                {
-                    SyncRecord.modified: record.modified,
-                    SyncRecord.payload: record.payload,
-                    SyncRecord.sortindex: record.sortindex,
-                    SyncRecord.ttl: record.ttl,
-                }
-            ).where(SyncRecord.id == row_id)
+            await self._run(
+                SyncRecord.update(
+                    {
+                        SyncRecord.modified: record.modified,
+                        SyncRecord.payload: record.payload,
+                        SyncRecord.sortindex: record.sortindex,
+                        SyncRecord.ttl: record.ttl,
+                    }
+                ).where(SyncRecord.id == row_id)
+            )
         if removals:
-            await SyncRecord.delete().where(SyncRecord.id.is_in(removals))
+            await self._run(SyncRecord.delete().where(SyncRecord.id.is_in(removals)))
 
         return ApplyResult(inserted=len(fresh), updated=len(updates), deleted=len(removals))
 
@@ -246,14 +293,14 @@ class Store:
         applied = result[collection]
         return applied.inserted + applied.updated
 
+    @_guard_store
     async def load_cursor(self, collection: str) -> float | None:
         """读游标。没有、或者值坏了（不是个数字）都返回 ``None`` —— 调用方回退到全量。
 
         游标坏了就当没有：全量重拉一次是**安全**的，而拿着一个坏游标往下跑会**静默漏数据**。
         """
-        self._bind()
-        rows = await SyncCursor.select(SyncCursor.last_modified).where(
-            SyncCursor.collection == collection
+        rows = await self._run(
+            SyncCursor.select(SyncCursor.last_modified).where(SyncCursor.collection == collection)
         )
         if not rows:
             return None
@@ -262,6 +309,7 @@ class Store:
             return None
         return float(value)
 
+    @_guard_store
     async def save_cursor(
         self,
         collection: str,
@@ -271,35 +319,38 @@ class Store:
         records: int,
     ) -> None:
         """推进游标。**只在一次完整拉取成功之后调**。"""
-        self._bind()
         async with self._engine.transaction():
-            await SyncCursor.delete().where(SyncCursor.collection == collection)
-            await SyncCursor.insert(
-                SyncCursor(
-                    collection=collection,
-                    last_modified=last_modified,
-                    synced_at=synced_at,
-                    records=records,
+            await self._run(SyncCursor.delete().where(SyncCursor.collection == collection))
+            await self._run(
+                SyncCursor.insert(
+                    SyncCursor(
+                        collection=collection,
+                        last_modified=last_modified,
+                        synced_at=synced_at,
+                        records=records,
+                    )
                 )
             )
 
+    @_guard_store
     async def load_records(self, collection: str) -> list[tuple[str, str | None]]:
         """读一个 collection 的 ``(record_id, payload)``。"""
-        self._bind()
-        rows = await SyncRecord.select(SyncRecord.record_id, SyncRecord.payload).where(
-            SyncRecord.collection == collection
+        rows = await self._run(
+            SyncRecord.select(SyncRecord.record_id, SyncRecord.payload).where(
+                SyncRecord.collection == collection
+            )
         )
         return [(str(row["record_id"]), row["payload"]) for row in rows]
 
+    @_guard_store
     async def count_records(self, collection: str) -> int:
         """库里这个 collection 现在有多少条。"""
-        self._bind()
-        return await SyncRecord.count().where(SyncRecord.collection == collection)
+        return await self._run(SyncRecord.count().where(SyncRecord.collection == collection))
 
+    @_guard_store
     async def load_cursors(self) -> tuple[CursorInfo, ...]:
         """所有 collection 的同步进度 —— 没同步过的 collection 不在里面。"""
-        self._bind()
-        rows = await SyncCursor.select().order_by(SyncCursor.collection)
+        rows = await self._run(SyncCursor.select().order_by(SyncCursor.collection))
         return tuple(
             CursorInfo(
                 collection=str(row["collection"]),
@@ -310,6 +361,7 @@ class Store:
             for row in rows
         )
 
+    @_guard_store
     async def store_firefox_visits(self, visits: Sequence[StoredVisit]) -> ApplyResult:
         """写入 firefox 源的访问。**幂等** —— 同一份导出再导一次，条数不会翻倍。
 
@@ -318,18 +370,19 @@ class Store:
 
         标题变了算 ``updated``（Firefox 会改标题，那是同一次访问，不该多出一行）。
         """
-        self._bind()
         existing = {
             (str(row["machine"]), str(row["url"]), int(row["visited_at"])): (
                 row["id"],
                 str(row["title"]),
             )
-            for row in await FirefoxVisitRow.select(
-                FirefoxVisitRow.id,
-                FirefoxVisitRow.machine,
-                FirefoxVisitRow.url,
-                FirefoxVisitRow.visited_at,
-                FirefoxVisitRow.title,
+            for row in await self._run(
+                FirefoxVisitRow.select(
+                    FirefoxVisitRow.id,
+                    FirefoxVisitRow.machine,
+                    FirefoxVisitRow.url,
+                    FirefoxVisitRow.visited_at,
+                    FirefoxVisitRow.title,
+                )
             )
         }
 
@@ -356,18 +409,20 @@ class Store:
                 updates.append((found[0], item.title))
 
         if fresh:
-            await _insert_rows(FirefoxVisitRow, fresh)
+            await self._insert_rows(FirefoxVisitRow, fresh)
         for row_id, title in updates:
-            await FirefoxVisitRow.update({FirefoxVisitRow.title: title}).where(
-                FirefoxVisitRow.id == row_id
+            await self._run(
+                FirefoxVisitRow.update({FirefoxVisitRow.title: title}).where(
+                    FirefoxVisitRow.id == row_id
+                )
             )
 
         return ApplyResult(inserted=len(fresh), updated=len(updates), deleted=0)
 
+    @_guard_store
     async def load_firefox_visits(self) -> tuple[StoredVisit, ...]:
         """读出全部 firefox 访问，按时间升序。**没导入过就是空元组** —— 单源降级走这条路。"""
-        self._bind()
-        rows = await FirefoxVisitRow.select().order_by(FirefoxVisitRow.visited_at)
+        rows = await self._run(FirefoxVisitRow.select().order_by(FirefoxVisitRow.visited_at))
         return tuple(
             StoredVisit(
                 machine=str(row["machine"]),
@@ -379,6 +434,7 @@ class Store:
             for row in rows
         )
 
+    @_guard_store
     async def merge_sync_records(
         self, records: Sequence[PortableRecord]
     ) -> tuple[ApplyResult, int]:
@@ -390,11 +446,10 @@ class Store:
         墓碑（``payload`` 为 ``None``）直接跳过：库里的约定是"有行 == 这条记录存在"
         （见本模块开头的说明），收下一条空记录会把这个约定捅破。
         """
-        self._bind()
         existing = {
             (str(row["collection"]), str(row["record_id"])): float(row["modified"])
-            for row in await SyncRecord.select(
-                SyncRecord.collection, SyncRecord.record_id, SyncRecord.modified
+            for row in await self._run(
+                SyncRecord.select(SyncRecord.collection, SyncRecord.record_id, SyncRecord.modified)
             )
         }
 
@@ -423,26 +478,30 @@ class Store:
                 kept += 1
 
         if fresh:
-            await _insert_rows(SyncRecord, fresh)
+            await self._insert_rows(SyncRecord, fresh)
         for item in updates:
-            await SyncRecord.update(
-                {
-                    SyncRecord.modified: item.modified,
-                    SyncRecord.payload: item.payload,
-                    SyncRecord.sortindex: item.sortindex,
-                    SyncRecord.ttl: item.ttl,
-                }
-            ).where(
-                (SyncRecord.collection == item.collection)
-                & (SyncRecord.record_id == item.record_id)
+            await self._run(
+                SyncRecord.update(
+                    {
+                        SyncRecord.modified: item.modified,
+                        SyncRecord.payload: item.payload,
+                        SyncRecord.sortindex: item.sortindex,
+                        SyncRecord.ttl: item.ttl,
+                    }
+                ).where(
+                    (SyncRecord.collection == item.collection)
+                    & (SyncRecord.record_id == item.record_id)
+                )
             )
 
         return ApplyResult(inserted=len(fresh), updated=len(updates), deleted=0), kept
 
+    @_guard_store
     async def load_all_records(self) -> tuple[PortableRecord, ...]:
         """库里全部记录（明文形态）—— 导出便携文件用。"""
-        self._bind()
-        rows = await SyncRecord.select().order_by(SyncRecord.collection, SyncRecord.record_id)
+        rows = await self._run(
+            SyncRecord.select().order_by(SyncRecord.collection, SyncRecord.record_id)
+        )
         return tuple(
             PortableRecord(
                 collection=str(row["collection"]),
@@ -455,10 +514,10 @@ class Store:
             for row in rows
         )
 
+    @_guard_store
     async def load_all_cursors(self) -> tuple[PortableCursor, ...]:
         """库里全部游标 —— 导出便携文件用。"""
-        self._bind()
-        rows = await SyncCursor.select()
+        rows = await self._run(SyncCursor.select())
         return tuple(
             PortableCursor(
                 collection=str(row["collection"]),
@@ -506,12 +565,28 @@ class CursorInfo:
 def _bind(engine: SQLiteEngine) -> None:
     """把表绑到调用者给的 engine 上。
 
-    piccolo 的表是类级别的单例，"绑哪个库"只能挂在类上 —— 所以每次操作都显式重绑一次，
-    测试才能各用各的临时库（见 ``tests/test_store.py``）。
+    piccolo 的表是类级别的单例，"绑哪个库"只能挂在类上 —— 绑定本身没有实例级
+    的替代品，所以隔离靠**每条查询前重绑**（见 :func:`_run_on`），测试也才能
+    各用各的临时库（见 ``tests/test_store.py``）。
     """
     for table in (FirefoxVisitRow, SyncRecord, SyncCursor):
         # piccolo 没有"换绑数据库"的公开 API —— 只能碰类的 _meta
         table._meta.db = engine  # pyright: ignore[reportPrivateUsage]
+
+
+async def _run_on[T](engine: SQLiteEngine, query: Awaitable[T]) -> T:
+    """把表绑到 ``engine``，然后立刻执行 ``query`` —— **每条查询都过这里**。
+
+    为什么不是"每个 Store 方法绑一次"：绑定是进程级类属性，方法中途另一个 Store
+    一重绑，后面几条查询就进了别人的库（交错写路径 + ``store_batches`` 事务失护）。
+
+    为什么这样绑就安全：piccolo 的 ``Query._run`` 在**进入协程的第一段同步代码里**
+    就读 ``table._meta.db`` 捕获 engine，绑定和捕获之间没有 await 点 —— 单线程
+    asyncio 下别的 task 插不进来。查询 await 期间绑确实可能被换掉，但 SQLite 的
+    ``_process_results`` 是恒等变换，无所谓。
+    """
+    _bind(engine)
+    return await query
 
 
 async def open_database(
@@ -535,14 +610,17 @@ async def open_database(
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     engine = SQLiteEngine(path=str(path))
+    try:
+        if not read_only:
+            await _migrate_firefox_visits(engine, warn)
+            await _run_on(engine, SyncRecord.create_table(if_not_exists=True))
+            await _run_on(engine, SyncCursor.create_table(if_not_exists=True))
+            await _run_on(engine, FirefoxVisitRow.create_table(if_not_exists=True))
+            await _enforce_record_identity(engine, warn)
+    except sqlite3.Error as exc:
+        # engine 构造不摸库；损坏文件在这里的第一次查询才炸（read_only 更晚 —— 在 Store 方法上）
+        raise _translate_sqlite_error(str(path), exc) from exc
     _bind(engine)
-    if read_only:
-        return Store(engine)
-    await _migrate_firefox_visits(engine, warn)
-    await SyncRecord.create_table(if_not_exists=True)
-    await SyncCursor.create_table(if_not_exists=True)
-    await FirefoxVisitRow.create_table(if_not_exists=True)
-    await _enforce_record_identity(engine, warn)
     return Store(engine)
 
 
@@ -560,38 +638,48 @@ async def _migrate_firefox_visits(engine: SQLiteEngine, warn: Callable[[str], No
     """
     tables = {
         str(row["name"])
-        for row in await FirefoxVisitRow.raw(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-            " AND name IN ('local_visits', 'firefox_visits')"
+        for row in await _run_on(
+            engine,
+            FirefoxVisitRow.raw(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+                " AND name IN ('local_visits', 'firefox_visits')"
+            ),
         )
     }
     if "local_visits" not in tables:
         return
     if "firefox_visits" not in tables:
-        await FirefoxVisitRow.raw("ALTER TABLE local_visits RENAME TO firefox_visits")
+        await _run_on(
+            engine, FirefoxVisitRow.raw("ALTER TABLE local_visits RENAME TO firefox_visits")
+        )
         return
 
     async def count_visits() -> int:
-        rows = await FirefoxVisitRow.raw("SELECT COUNT(*) AS n FROM firefox_visits")
+        rows = await _run_on(
+            engine, FirefoxVisitRow.raw("SELECT COUNT(*) AS n FROM firefox_visits")
+        )
         return int(rows[0]["n"])
 
     moved = 0
     async with engine.transaction():
         before = await count_visits()
-        await FirefoxVisitRow.raw(
-            "INSERT INTO firefox_visits (machine, url, title, visited_at, visit_type)"
-            " SELECT machine, url, title, visited_at, visit_type FROM ("
-            "  SELECT machine, url, title, visited_at, visit_type,"
-            "   ROW_NUMBER() OVER ("
-            "    PARTITION BY machine, url, visited_at ORDER BY id DESC"
-            "   ) AS rank FROM local_visits"
-            " ) AS old WHERE old.rank = 1 AND NOT EXISTS ("
-            "  SELECT 1 FROM firefox_visits AS fresh"
-            "  WHERE fresh.machine = old.machine AND fresh.url = old.url"
-            "   AND fresh.visited_at = old.visited_at)"
+        await _run_on(
+            engine,
+            FirefoxVisitRow.raw(
+                "INSERT INTO firefox_visits (machine, url, title, visited_at, visit_type)"
+                " SELECT machine, url, title, visited_at, visit_type FROM ("
+                "  SELECT machine, url, title, visited_at, visit_type,"
+                "   ROW_NUMBER() OVER ("
+                "    PARTITION BY machine, url, visited_at ORDER BY id DESC"
+                "   ) AS rank FROM local_visits"
+                " ) AS old WHERE old.rank = 1 AND NOT EXISTS ("
+                "  SELECT 1 FROM firefox_visits AS fresh"
+                "  WHERE fresh.machine = old.machine AND fresh.url = old.url"
+                "   AND fresh.visited_at = old.visited_at)"
+            ),
         )
         moved = await count_visits() - before
-        await FirefoxVisitRow.raw("DROP TABLE local_visits")
+        await _run_on(engine, FirefoxVisitRow.raw("DROP TABLE local_visits"))
     if warn is not None:
         warn(
             f"本地库里 local_visits 与 firefox_visits 两张表并存 —— 已把旧表独有的 "
@@ -612,18 +700,24 @@ async def _enforce_record_identity(
     ``(collection, record_id)`` 只保留 ``modified`` 最新的一条，同值留行号大的。
     **收敛不是悄悄干的** —— 删了几条报给 ``warn``（命令行那层接 stderr）。
     """
-    existing = await SyncRecord.raw(
-        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = {}",
-        _RECORD_IDENTITY_INDEX,
+    existing = await _run_on(
+        engine,
+        SyncRecord.raw(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = {}",
+            _RECORD_IDENTITY_INDEX,
+        ),
     )
     if existing:
         return
-    duplicates = await SyncRecord.raw(
-        "SELECT COUNT(*) AS folded FROM ("
-        "SELECT id, ROW_NUMBER() OVER ("
-        "PARTITION BY collection, record_id ORDER BY modified DESC, id DESC"
-        ") AS rank FROM sync_records"
-        ") WHERE rank > 1"
+    duplicates = await _run_on(
+        engine,
+        SyncRecord.raw(
+            "SELECT COUNT(*) AS folded FROM ("
+            "SELECT id, ROW_NUMBER() OVER ("
+            "PARTITION BY collection, record_id ORDER BY modified DESC, id DESC"
+            ") AS rank FROM sync_records"
+            ") WHERE rank > 1"
+        ),
     )
     folded = int(duplicates[0]["folded"]) if duplicates else 0
     if folded and warn is not None:
@@ -631,17 +725,23 @@ async def _enforce_record_identity(
             f"本地库里有 {folded} 条重复记录（同一个 collection + 同 id）—— "
             f"已收敛，每个 id 只保留 modified 最新的一条。"
         )
-    await SyncRecord.raw(
-        "DELETE FROM sync_records WHERE id IN ("
-        "SELECT id FROM ("
-        "SELECT id, ROW_NUMBER() OVER ("
-        "PARTITION BY collection, record_id ORDER BY modified DESC, id DESC"
-        ") AS rank FROM sync_records"
-        ") WHERE rank > 1)"
+    await _run_on(
+        engine,
+        SyncRecord.raw(
+            "DELETE FROM sync_records WHERE id IN ("
+            "SELECT id FROM ("
+            "SELECT id, ROW_NUMBER() OVER ("
+            "PARTITION BY collection, record_id ORDER BY modified DESC, id DESC"
+            ") AS rank FROM sync_records"
+            ") WHERE rank > 1)"
+        ),
     )
-    await SyncRecord.raw(
-        f"CREATE UNIQUE INDEX IF NOT EXISTS {_RECORD_IDENTITY_INDEX}"
-        " ON sync_records (collection, record_id)"
+    await _run_on(
+        engine,
+        SyncRecord.raw(
+            f"CREATE UNIQUE INDEX IF NOT EXISTS {_RECORD_IDENTITY_INDEX}"
+            " ON sync_records (collection, record_id)"
+        ),
     )
 
 
@@ -652,12 +752,6 @@ piccolo 把整批拼成一条多值 ``INSERT``，变量数 = 行数 × 列数；
 ``SQLITE_MAX_VARIABLE_NUMBER`` 老版本只有 **999**（新版 32766），上万条真实历史
 就会撞上 ``too many SQL variables``。按最保守的 999 除以最宽的表（7 列）留足余量取 100。
 """
-
-
-async def _insert_rows[T: Table](table: type[T], rows: Sequence[T]) -> None:
-    """分批 ``INSERT`` —— 绕过 SQLite 的变量数上限。空列表什么都不做。"""
-    for start in range(0, len(rows), _INSERT_CHUNK):
-        await table.insert(*rows[start : start + _INSERT_CHUNK])
 
 
 def _newest_per_id(records: Sequence[EncryptedBso]) -> list[EncryptedBso]:

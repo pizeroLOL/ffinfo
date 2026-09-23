@@ -185,14 +185,16 @@ async def test_export_report_says_what_happened(tmp_path: Path) -> None:
     assert payload["visits"] == 1
 
 
-def portable_file(path: Path, *, visits: list[tuple[str, int]], machine: str = "src") -> None:
+def portable_file(
+    path: Path, *, visits: list[tuple[str, int]], machine: str = "src", title: str = "T"
+) -> None:
     write_portable(
         path,
         source=ExportSource(machine=machine, profile="default-release", generator="test"),
         visits=[
             FirefoxVisit(
                 url=url,
-                title="T",
+                title=title,
                 visited_at=datetime.fromtimestamp(us // US, tz=UTC).replace(microsecond=us % US),
                 visit_type=1,
             )
@@ -211,8 +213,11 @@ async def test_import_lands_in_the_firefox_table(tmp_path: Path) -> None:
     )
 
     assert report.input == "portable"
-    assert report.format_version == 2
+    assert report.format_version == 3
     assert report.visits_inserted == 1
+    assert report.visits_updated == 0
+    assert report.visits_skipped == 0
+    assert report.visits_inserted + report.visits_updated + report.visits_skipped == 1
     assert report.machine == "src"
     assert report.warnings == []
 
@@ -226,7 +231,36 @@ async def test_import_twice_does_not_duplicate(tmp_path: Path) -> None:
     second = await run_import(database_path=tmp_path / "db.sqlite", input=portable)
 
     assert second.visits_inserted == 0
+    assert second.visits_updated == 0
     assert second.visits_skipped == 1
+    assert second.visits_inserted + second.visits_updated + second.visits_skipped == 1
+
+
+async def test_title_update_counts_as_visits_updated(tmp_path: Path) -> None:
+    """标题被更新的访问计进 ``visits_updated``，三计数能对上账。
+
+    恒等式 ``inserted + updated + skipped == 输入条数`` 对每次 import 都成立；
+    标题更新既不凭空消失，也不冒充插入或跳过。
+    """
+    visits = [("https://a.example/", micros(DAY))]
+    portable_file(tmp_path / "portable.sqlite", visits=visits, title="OLD")
+    portable = PortableImport(path=tmp_path / "portable.sqlite")
+    await run_import(database_path=tmp_path / "db.sqlite", input=portable)
+
+    portable_file(tmp_path / "portable.sqlite", visits=visits, title="NEW")
+    report = await run_import(database_path=tmp_path / "db.sqlite", input=portable)
+
+    assert report.visits_inserted == 0
+    assert report.visits_updated == 1
+    assert report.visits_skipped == 0
+    assert report.visits_inserted + report.visits_updated + report.visits_skipped == len(visits)
+    # 库里确实是被更新过的
+    connection = sqlite3.connect(tmp_path / "db.sqlite")
+    try:
+        titles = [row[0] for row in connection.execute("SELECT title FROM firefox_visits")]
+    finally:
+        connection.close()
+    assert titles == ["NEW"]
 
 
 async def test_import_surfaces_warnings_instead_of_swallowing_them(tmp_path: Path) -> None:
@@ -308,6 +342,8 @@ async def test_import_from_firefox_lands_in_the_table(tmp_path: Path) -> None:
     assert report.records_inserted == 0
     assert report.cursors_advanced == 0
     payload = json.loads(render(report, machine=True))
+    assert payload["format_version"] == 3
+    assert payload["visits_updated"] == 0
     assert payload["input"] == "firefox"
     assert payload["portable_path"] is None
     assert payload["exported_at"] is None
@@ -328,8 +364,12 @@ async def test_import_from_firefox_is_idempotent(tmp_path: Path) -> None:
     second = await run_import(database_path=database, input=source)
 
     assert first.visits_inserted == 1
+    assert first.visits_updated == 0
+    assert first.visits_skipped == 0
     assert second.visits_inserted == 0
+    assert second.visits_updated == 0
     assert second.visits_skipped == 1
+    assert second.visits_inserted + second.visits_updated + second.visits_skipped == 1
     store = await open_database(database)
     assert len(await store.load_firefox_visits()) == 1
 
