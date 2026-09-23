@@ -603,8 +603,13 @@ dispatcher（改为 `run_history` / `run_bookmarks` / `run_tabs` —— 一个�
 | `list history` | 三列表格（时间 / 标题 / 域名）+ 顶部汇总（条数、源、新鲜度） |
 | `list bookmarks` | 缩进树（文件夹 `▸`、书签 `•`） |
 | `list tabs` | 设备名小标题 + 标签列表 |
-| `sync` / `export` / `import` / `profiles` | `key: value` 短摘要 |
+| `sync` / `export` / `import` / `profiles` | `key: value` 短摘要 —— **行从模型字段推导** |
 
+- 四份 key:value 报告的人读行经 `key_value_lines(report, order=…, formatters=…)` 推导：
+  「报告含什么」只在 pydantic 模型声明一次；`order` 覆盖表钉展示序（可含非字段的
+  计算行，如 sync 的 `records` 合计），`formatters` 覆盖表钉 null 显示（`portable_path or '—'`）
+  与列表 / `FileInfo` 的拼法。`order` 没列的模型字段按声明序**追加在末尾** ——
+  加字段不必改 `render` 才显示（泛型断言可测）。三份 list 报告与 `login` 散文仍是手写排版。
 - 人读时间用**本机时区**（`tz` 可注入，测试确定）；JSON 仍是 UTC ISO —— agent 契约不动。
 - 宽度交给 `rich`（`Console` 决定；非 TTY 固定），长 URL `overflow="ellipsis"`，不手工截断；
   `width` 可注入以便测试。

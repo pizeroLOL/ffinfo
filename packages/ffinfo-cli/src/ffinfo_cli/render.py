@@ -6,7 +6,8 @@ JSON / stderr 只有错误"这条契约在每个命令里重复一遍；默认�
 
 * ``machine=True`` —— 给 agent 的 JSON，形状与旧 ``to_json`` 逐字段一致
 * ``machine=False`` —— 给人读的排版：history 三列表格、bookmarks 缩进树、tabs 设备小标题、
-  login 中文散文、其余 ``key: value`` 短摘要
+  login 中文散文；sync / export / import / profiles 四份 ``key: value`` 的行
+  **从模型字段推导**（覆盖表只钉顺序与 null 展示，见 :func:`key_value_lines`）
 
 人读时间用**注入的时区**（测试确定；不注入才用本机时区），宽度交给 ``rich``
 （``width`` 可注入）。JSON 仍是 UTC ISO —— agent 契约不动。
@@ -15,11 +16,13 @@ JSON / stderr 只有错误"这条契约在每个命令里重复一遍；默认�
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, tzinfo
 from io import StringIO
 from typing import assert_never
 from urllib.parse import urlsplit
 
+from pydantic import BaseModel
 from rich import box
 from rich.console import Console
 from rich.table import Table
@@ -34,7 +37,7 @@ from ffinfo_cli.profiles import FileInfo, ProfilesReport
 from ffinfo_cli.sync import SyncReport
 from ffinfo_cli.transfer import ExportReport, ImportReport
 
-__all__ = ["Report", "render"]
+__all__ = ["Report", "key_value_lines", "render"]
 
 type Report = ListReport | SyncReport | ExportReport | ImportReport | ProfilesReport | LoginReport
 """六份能输出的报告 —— **封闭** union，pyright 能查 ``match`` 的穷尽性。"""
@@ -145,72 +148,132 @@ def _render_tabs(report: TabsReport) -> str:
     return "\n".join(lines)
 
 
+def key_value_lines[ReportT: BaseModel](
+    report: ReportT,
+    *,
+    order: Sequence[str],
+    formatters: dict[str, Callable[[ReportT], str]] | None = None,
+) -> list[str]:
+    """模型字段 → 人读 ``key: value`` 行序 —— 四份纯 key:value 报告共用的推导核。
+
+    ``order`` 是覆盖表里的**展示序**：只钉要保持现网顺序的键（可含非字段的计算行，
+    如 sync 的 ``records`` 合计）。模型有、``order`` 没列的字段按**声明序追加在末尾** ——
+    加字段不必回来改这里，泛型断言（每个模型字段都在行里）才测得住。
+
+    ``formatters`` 按键覆盖值的展示：null 破折号、列表 join、FileInfo 存在性……
+    都落在覆盖表，不进推导核；没覆盖的字段走 ``str(值)``。
+    """
+    fmt = formatters if formatters is not None else {}
+    fields = type(report).model_fields
+    keys = list(order)
+    for name in fields:
+        if name not in keys:
+            keys.append(name)
+    lines: list[str] = []
+    for key in keys:
+        if key in fmt:
+            display = fmt[key](report)
+        elif key in fields:
+            display = str(getattr(report, key))
+        else:
+            msg = f"覆盖表里的 {key!r} 既不是模型字段也没有 formatter"
+            raise ValueError(msg)
+        lines.append(f"{key}: {display}")
+    return lines
+
+
 def _render_sync(report: SyncReport) -> str:
-    """一次 sync 的 ``key: value`` 短摘要。"""
-    records = sum(entry.records for entry in report.collections)
-    protocol = "、".join(f"{name}={count}" for name, count in report.protocol.items()) or "无"
+    """一次 sync 的 ``key: value`` 短摘要 —— 行从模型字段推导。"""
     return "\n".join(
-        [
-            "collections: " + ("、".join(entry.collection for entry in report.collections) or "无"),
-            f"records: {records}",
-            f"elapsed_seconds: {report.elapsed_seconds}",
-            f"database: {report.database}",
-            f"protocol: {protocol}",
-        ]
+        key_value_lines(
+            report,
+            order=("collections", "records", "elapsed_seconds", "database", "protocol"),
+            formatters={
+                "collections": lambda r: "、".join(e.collection for e in r.collections) or "无",
+                "records": lambda r: str(sum(e.records for e in r.collections)),
+                "protocol": lambda r: "、".join(f"{k}={v}" for k, v in r.protocol.items()) or "无",
+            },
+        )
     )
 
 
 def _render_export(report: ExportReport) -> str:
-    """一次 export 的 ``key: value`` 短摘要。"""
+    """一次 export 的 ``key: value`` 短摘要 —— 行从模型字段推导。"""
     return "\n".join(
-        [
-            f"destination: {report.destination}",
-            f"machine: {report.machine}",
-            f"profile: {report.profile}",
-            f"schema_version: {report.schema_version}",
-            f"visits: {report.visits}",
-            f"records: {report.records}",
-            f"cursors: {report.cursors}",
-            f"wal_bytes: {report.wal_bytes}",
-            f"elapsed_seconds: {report.elapsed_seconds}",
-        ]
+        key_value_lines(
+            report,
+            order=(
+                "destination",
+                "machine",
+                "profile",
+                "schema_version",
+                "visits",
+                "records",
+                "cursors",
+                "wal_bytes",
+                "elapsed_seconds",
+            ),
+        )
     )
 
 
 def _render_import(report: ImportReport) -> str:
-    """一次 import 的 ``key: value`` 短摘要。"""
+    """一次 import 的 ``key: value`` 短摘要 —— 行从模型字段推导。"""
     return "\n".join(
-        [
-            f"input: {report.input}",
-            f"portable_path: {report.portable_path or '—'}",
-            f"machine: {report.machine}",
-            f"profile: {report.profile}",
-            f"exported_at: {report.exported_at or '—'}",
-            f"visits_inserted: {report.visits_inserted}",
-            f"visits_updated: {report.visits_updated}",
-            f"visits_skipped: {report.visits_skipped}",
-            f"records_inserted: {report.records_inserted}",
-            f"records_updated: {report.records_updated}",
-            f"records_kept: {report.records_kept}",
-            f"cursors_advanced: {report.cursors_advanced}",
-            f"elapsed_seconds: {report.elapsed_seconds}",
-        ]
+        key_value_lines(
+            report,
+            order=(
+                "input",
+                "portable_path",
+                "machine",
+                "profile",
+                "exported_at",
+                "visits_inserted",
+                "visits_updated",
+                "visits_skipped",
+                "records_inserted",
+                "records_updated",
+                "records_kept",
+                "cursors_advanced",
+                "elapsed_seconds",
+            ),
+            formatters={
+                "portable_path": lambda r: r.portable_path or "—",
+                "exported_at": lambda r: r.exported_at or "—",
+                "warnings": lambda r: "、".join(r.warnings) or "无",
+            },
+        )
     )
 
 
 def _render_profiles(report: ProfilesReport) -> str:
-    """``profiles`` 的 ``key: value`` 短摘要。"""
-    collections = "、".join(item.collection for item in report.collections) or "无"
+    """``profiles`` 的 ``key: value`` 短摘要 —— 行从模型字段推导。"""
     return "\n".join(
-        [
-            f"platform: {report.platform}",
-            f"home: {report.home}",
-            f"profiles: {len(report.profiles)}",
-            f"collections: {collections}",
-            f"database: {_file_info(report.database)}",
-            f"credentials: {_file_info(report.credentials)}",
-            f"identity: {_file_info(report.identity)}",
-        ]
+        key_value_lines(
+            report,
+            order=(
+                "platform",
+                "home",
+                "profiles",
+                "collections",
+                "database",
+                "credentials",
+                "identity",
+            ),
+            formatters={
+                "profiles": lambda r: str(len(r.profiles)),
+                "collections": lambda r: "、".join(c.collection for c in r.collections) or "无",
+                "searched_roots": lambda r: (
+                    "、".join(_file_info(f) for f in r.searched_roots) or "无"
+                ),
+                "config_dir": lambda r: _file_info(r.config_dir),
+                "data_dir": lambda r: _file_info(r.data_dir),
+                "database": lambda r: _file_info(r.database),
+                "credentials": lambda r: _file_info(r.credentials),
+                "identity": lambda r: _file_info(r.identity),
+                "notes": lambda r: "、".join(r.notes) or "无",
+            },
+        )
     )
 
 

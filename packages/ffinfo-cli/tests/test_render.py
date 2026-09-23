@@ -2,6 +2,8 @@
 
 纯函数：注入 ``machine`` / ``tz`` / ``width`` 让两种模式的输出都确定。
 机器模式必须与旧 ``to_json`` 逐字段一致；人读模式钉住排版（时间走注入时区）。
+四份 key:value 报告的人读行**从模型字段推导** —— 泛型断言钉「模型有的字段必出」，
+逐行清单只回归顺序与 null 展示。
 """
 
 from __future__ import annotations
@@ -10,18 +12,24 @@ import json
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
+import pytest
+
 from ffinfo.bookmarks import BookmarkNode
 from ffinfo.tabs import ClientTabs, TabEntry
 from ffinfo_cli.list.bookmarks import BookmarksReport
 from ffinfo_cli.list.history import HistoryItem, HistoryReport
 from ffinfo_cli.list.tabs import TabsReport
+from ffinfo_cli.login import LoginReport
 from ffinfo_cli.profiles import CollectionProgress, FileInfo, ProfileInfo, ProfilesReport
-from ffinfo_cli.render import render
+from ffinfo_cli.render import key_value_lines, render
 from ffinfo_cli.sync import CollectedSync, SyncReport
 from ffinfo_cli.transfer import ExportReport, ImportReport
 
 SHANGHAI = timezone(timedelta(hours=8), "CST")
 """固定东八区 —— 人读时间必须跟着注入的时区走，不能跟着跑测试的机器。"""
+
+type KeyValueReport = SyncReport | ExportReport | ImportReport | ProfilesReport
+"""四份纯 key:value 报告 —— 人读行从模型字段推导，泛型断言的对象。"""
 
 
 def history_report(*, items: list[HistoryItem] | None = None, **overrides: Any) -> HistoryReport:
@@ -217,11 +225,12 @@ def test_human_sync_is_a_key_value_summary() -> None:
         "elapsed_seconds: 0.5",
         "database: /tmp/ffinfo.sqlite",
         "protocol: crypto=1",
+        "format_version: 2",
     ]
 
 
-def test_human_export_is_a_key_value_summary() -> None:
-    report = ExportReport(
+def export_report() -> ExportReport:
+    return ExportReport(
         destination="/tmp/portable.sqlite",
         machine="laptop",
         profile="default-release",
@@ -234,7 +243,9 @@ def test_human_export_is_a_key_value_summary() -> None:
         elapsed_seconds=0.25,
     )
 
-    output = render(report, machine=False, tz=UTC, width=120)
+
+def test_human_export_is_a_key_value_summary() -> None:
+    output = render(export_report(), machine=False, tz=UTC, width=120)
 
     assert output.splitlines() == [
         "destination: /tmp/portable.sqlite",
@@ -246,11 +257,13 @@ def test_human_export_is_a_key_value_summary() -> None:
         "cursors: 1",
         "wal_bytes: 0",
         "elapsed_seconds: 0.25",
+        "format_version: 1",
+        "profile_path: /home/u/.mozilla/default-release",
     ]
 
 
-def test_human_import_is_a_key_value_summary() -> None:
-    report = ImportReport(
+def import_report() -> ImportReport:
+    return ImportReport(
         input="firefox",
         machine="laptop",
         profile="default-release",
@@ -264,7 +277,9 @@ def test_human_import_is_a_key_value_summary() -> None:
         elapsed_seconds=0.25,
     )
 
-    output = render(report, machine=False, tz=UTC, width=120)
+
+def test_human_import_is_a_key_value_summary() -> None:
+    output = render(import_report(), machine=False, tz=UTC, width=120)
 
     assert output.splitlines() == [
         "input: firefox",
@@ -280,6 +295,8 @@ def test_human_import_is_a_key_value_summary() -> None:
         "records_kept: 0",
         "cursors_advanced: 0",
         "elapsed_seconds: 0.25",
+        "format_version: 3",
+        "warnings: 无",
     ]
 
 
@@ -317,4 +334,67 @@ def test_human_profiles_is_a_key_value_summary() -> None:
         "database: /home/u/.local/share/ffinfo/ffinfo.sqlite（存在）",
         "credentials: /home/u/.config/ffinfo/credentials.age（存在）",
         "identity: /home/u/.config/ffinfo/age-key.txt（存在）",
+        "format_version: 1",
+        "generated_at: 2026-09-13T17:30:12+00:00",
+        "searched_roots: 无",
+        "config_dir: /home/u/.config/ffinfo（存在）",
+        "data_dir: /home/u/.local/share/ffinfo（存在）",
+        "notes: 无",
+    ]
+
+
+def login_report() -> LoginReport:
+    return LoginReport(
+        credentials="/home/u/.config/ffinfo/credentials.age",
+        encryption_key_bytes=32,
+        hmac_key_bytes=32,
+    )
+
+
+_KEY_VALUE_REPORTS: list[KeyValueReport] = [
+    sync_report(),
+    export_report(),
+    import_report(),
+    profiles_report(),
+]
+
+
+@pytest.mark.parametrize("report", _KEY_VALUE_REPORTS, ids=lambda r: type(r).__name__)
+def test_every_model_field_appears_in_human_key_value(report: KeyValueReport) -> None:
+    """模型有的字段人读必出 —— 加字段不必回来改 ``render`` 才显示。"""
+    lines = render(report, machine=False, tz=UTC, width=120).splitlines()
+    keys = {line.partition(":")[0] for line in lines}
+
+    assert set(type(report).model_fields) <= keys
+
+
+def test_key_value_lines_append_model_fields_missing_from_order() -> None:
+    """推导核：``order`` 只钉展示序；没列的模型字段按声明序补在末尾。"""
+    report = sync_report()
+
+    lines = key_value_lines(report, order=("collections",))
+
+    keys = [line.partition(":")[0] for line in lines]
+    assert keys[0] == "collections"
+    assert set(type(report).model_fields) <= set(keys)
+
+
+def test_key_value_lines_rejects_unknown_key_without_formatter() -> None:
+    with pytest.raises(ValueError, match="既不是模型字段也没有 formatter"):
+        key_value_lines(sync_report(), order=("nope",))
+
+
+def test_human_list_reports_and_login_are_not_key_value_derived() -> None:
+    """三份 list 报告与 login 仍是手写排版 —— 推导核没误伤它们。"""
+    history = render(history_report(), machine=False, tz=UTC, width=120)
+    bookmarks = render(bookmarks_report(), machine=False, tz=UTC, width=120)
+    tabs = render(tabs_report(), machine=False, tz=UTC, width=120)
+    login = render(login_report(), machine=False, tz=UTC, width=120)
+
+    assert history.splitlines()[0].startswith("共 ")
+    assert bookmarks.splitlines() == ["▸ 工具", "  • 示例  https://example.com/"]
+    assert tabs.splitlines() == ["alpha", "  • 一  https://a.test/", "  • 二  https://b.test/"]
+    assert login.splitlines() == [
+        "登录成功 —— 同步密钥已就绪（32 字节加密密钥 + 32 字节签名密钥）。",
+        "凭据已加密存到 /home/u/.config/ffinfo/credentials.age",
     ]
