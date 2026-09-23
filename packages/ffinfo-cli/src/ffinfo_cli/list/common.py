@@ -132,9 +132,9 @@ async def _completion_records(
     credentials_path: Path,
     collection: str,
 ) -> tuple[Sequence[tuple[str, str | None]], KeyBundle]:
-    """补全专用：**只读**打开库，读出 collection 的密文并解出它的密钥。
+    """补全专用：跳过初始化打开库，读出 collection 的密文并解出它的密钥。
 
-    走 :func:`open_database` 的 ``read_only=True`` —— TAB 补全绝不建表、不迁移、不写。
+    走 :func:`open_database` 的 ``read_only=True`` —— TAB 补全不建表、不迁移、不改本地状态。
     """
     store = await open_database(database_path, read_only=True)
     records = await store.load_records(collection)

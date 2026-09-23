@@ -75,8 +75,12 @@ uv run prek install --hook-type pre-push  # 装 push 钩子（跑 pytest）
   默认路径只在 CLI 层决定。
 - **密码永不进 CLI。** 认证走 OAuth + PKCE + `keys_jwk`，密码只在 `accounts.firefox.com`
   的网页里输入。
-- **代码严格只读。** 一行写回 Mozilla 的操作都没有。
-  但要说清楚：scope 层面**做不到只读** —— `…/oldsync#read` 不返回 `keys_jwe`，
+- **「只读」只保证两处。** ① 读 Mozilla 账户：一行写回的操作都没有；
+  ② 导入 firefox 记录：`places.sqlite` 用 `mode=ro` 打开，不碰源文件。
+  本地库 `ffinfo.sqlite` **不在只读保证内** —— `sync` 落盘、`import` 合并、
+  `list` 建库都会写它；`store.open_database(read_only=True)` 只是跳过
+  建表/迁移/收敛，不是连接级只读。
+  另外 scope 层面**做不到只读** —— `…/oldsync#read` 不返回 `keys_jwe`，
   只能用完整的 `…/oldsync`（读写）。"能力上可写"和"能力上不可写"是两回事，
   见 [`docs/design.md`](docs/design.md) §2.1 的实测修订。
 - **不拉来历不明的 collection。** 白名单是 `history` / `bookmarks` / `tabs`；

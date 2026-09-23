@@ -3,7 +3,7 @@
 OAuth 授权时我们把 ``keys_jwk``（临时 P-256 公钥）交给 Mozilla，
 它把 scope 密钥用这个公钥加密后回一条 ``keys_jwe`` —— 这里负责把它解开。
 
-**只实现解密方向** —— 本库严格只读。
+**只实现解密方向** —— 不写回 Mozilla。
 """
 
 from __future__ import annotations

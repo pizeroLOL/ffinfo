@@ -120,7 +120,7 @@ _Avoid_: ffinfo 库、本地库、本地 SQLite、数据库
 
 **快照 (snapshot)**:
 把 firefox 库（`places.sqlite`）连同 `-wal` / `-shm` 复制出来、再把 WAL 折进主文件的
-**自包含**副本。export 只读快照。
+**自包含**副本。export 对 `places.sqlite` 只读（复制出来，不改源）。
 _Avoid_: 备份、副本
 
 **WAL**:

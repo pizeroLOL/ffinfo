@@ -11,7 +11,7 @@
 ``docs/src/tokenserver/tokenserver-api.md``；参考实现是 app-services 的
 ``components/sync15/src/client/{token,storage_client}.rs``。
 
-**严格只读**：本模块只有 GET，没有任何写回 Mozilla 的操作。
+**不写回 Mozilla**：本模块只有 GET，没有任何写操作打到服务器上。
 """
 
 from __future__ import annotations

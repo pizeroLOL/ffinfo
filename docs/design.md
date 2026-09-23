@@ -41,14 +41,17 @@
 | 2 | 数据源：**双源** | ① Firefox Sync（远程）② firefox `places.sqlite` |
 | 3 | firefox 源前提：**源机器必须有 Firefox** | 靠 `export`/`import` 搬运到目标机器 |
 | 4 | 数据范围：**历史 + 书签 + 标签页**（~~表单~~ ❌ 已证实拿不到，见 §3.7） | 表单移入 TODO |
-| 5 | 边界：**严格只读** | 用 `#read` scope，不写回 Mozilla |
+| 5 | 边界：**只读保证两处** | 不写回 Mozilla；firefox `places.sqlite` 只读打开（见下方修订） |
 | 6 | 输出：**纯数据** | 不做统计、不做 TUI（都进 TODO） |
 | 7 | 真正用户：**agent（skill）** | 已有一个类似 `bf-stats` 的 AstrBot skill 调它（作者工作区 `skills/ffinfo/`） |
 
 > ⚠️ **决策 5 的实测修订（2026-09-14）**：原写「用 `#read` scope，严格只读」。
 > 实测：`…/oldsync#read` **不返回 `keys_jwe`** —— FxA 只给完整的 `…/oldsync` 派发密钥。
-> 所以 scope 层面**只能是读写**。本库代码仍然严格只读（一行写操作都没有），
-> 但「能力上可写」和「能力上不可写」是两回事，不能含糊其辞。
+> 所以 scope 层面**只能是读写**。「只读」的承诺收窄为两处：① 不写回 Mozilla
+> （storage 只有 GET、JWE 只解密）；② 导入 firefox 记录时 `places.sqlite` 只读打开。
+> 本地库 `ffinfo.sqlite` 不在保证内 —— `sync` / `import` / `list` 都会写它；
+> `store` 的 `read_only=True` 只是跳过建表/迁移/收敛，不是连接级只读。
+> 「能力上可写」和「能力上不可写」是两回事，不能含糊其辞。
 
 ### 2.2 认证与密钥
 

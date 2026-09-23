@@ -264,7 +264,7 @@ async def _cloud_state(
 ) -> tuple[tuple[PortableRecord, ...], tuple[PortableCursor, ...]]:
     """把本地库里的云端状态读出来。库还不存在（没 login / sync 过）就返回空的。
 
-    **只读打开** —— "读出来带走"的命令不该顺手建表、更不该顺手收敛重复行。
+    跳过初始化（不建表、不迁移、不收敛）—— "读出来带走"的命令不该顺手改本地状态。
     """
     if not database_path.is_file():
         return (), ()

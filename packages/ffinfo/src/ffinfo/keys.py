@@ -29,7 +29,7 @@ OLD_SYNC_SCOPE: Final = "https://identity.mozilla.com/apps/oldsync"
 ⚠️ 2026-09-14 实测：``…/oldsync#read``（只读变体）**不返回 ``keys_jwe``** ——
 FxA 只给"携带密钥的 scope"（即这个完整的）派发密钥。
 
-代价要说清楚：scope 层面是**读写**权限。本库代码仍然严格只读（不写回 Mozilla），
+代价要说清楚：scope 层面是**读写**权限。本库不写回 Mozilla，
 但"能力上可写"和"能力上不可写"是两回事，不能含糊。见 ``docs/design.md`` 决策 5 的修订。"""
 
 
