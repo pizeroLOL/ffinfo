@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typer
 
-from ffinfo_cli.failures import guard
+from ffinfo_cli.failures import guard, machine_mode
 from ffinfo_cli.login import LoginReport, login_sync
 from ffinfo_cli.paths import credentials_path, identity_path
 from ffinfo_cli.render import render
@@ -25,11 +25,11 @@ def _login() -> LoginReport:
     )
 
 
-def login(ctx: typer.Context) -> None:
+def login() -> None:
     """登录 Mozilla 账号：在浏览器里授权，密码不经过本工具。"""
     report = guard(_login)
 
-    typer.echo(render(report, machine=bool(ctx.obj)))
+    typer.echo(render(report, machine=machine_mode()))
 
 
 def register(app: typer.Typer) -> None:

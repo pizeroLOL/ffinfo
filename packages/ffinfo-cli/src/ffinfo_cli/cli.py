@@ -14,7 +14,7 @@ import typer
 from ffinfo_cli import __version__
 from ffinfo_cli.commands import list as list_command
 from ffinfo_cli.commands import login, profiles, sync, transfer
-from ffinfo_cli.failures import CliTyper, set_machine
+from ffinfo_cli.failures import CliTyper
 
 app = CliTyper(
     name="ffinfo-cli",
@@ -33,7 +33,6 @@ def _version_callback(value: bool) -> None:
 
 @app.callback()
 def main(
-    ctx: typer.Context,
     machine: bool = typer.Option(
         False, "-j", "--json", help="输出机器可读的 JSON（默认人读；放在子命令之前）"
     ),
@@ -46,9 +45,12 @@ def main(
         is_eager=True,
     ),
 ) -> None:
-    """ffinfo_cli —— Firefox 数据到本地 SQLite 的搬运工。"""
-    ctx.obj = machine
-    set_machine(machine)
+    """ffinfo_cli —— Firefox 数据到本地 SQLite 的搬运工。
+
+    ``machine`` 的值不在这里落第二份 —— 模式在 Click 解析**之前**就由
+    ``failures.initialize_mode`` 从 argv 定好（唯一存储）。这里声明选项只为让
+    Click 认得 ``-j/--json``、``-h`` 的 help 里列得出来。
+    """
 
 
 login.register(app)

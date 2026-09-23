@@ -8,13 +8,13 @@ from pathlib import Path
 
 import typer
 
-from ffinfo_cli.failures import guard, warn
+from ffinfo_cli.failures import guard, machine_mode, warn
 from ffinfo_cli.places import HostContext
 from ffinfo_cli.profiles import profiles_blocking
 from ffinfo_cli.render import render
 
 
-def profiles(ctx: typer.Context) -> None:
+def profiles() -> None:
     """查看本地状态：探测到的 Firefox profile、目录、密钥、上次同步时间。"""
     report = guard(
         lambda: profiles_blocking(
@@ -22,7 +22,7 @@ def profiles(ctx: typer.Context) -> None:
         )
     )
 
-    typer.echo(render(report, machine=bool(ctx.obj)))
+    typer.echo(render(report, machine=machine_mode()))
 
 
 def register(app: typer.Typer) -> None:

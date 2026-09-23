@@ -34,7 +34,10 @@ from ffinfo_cli.failures import (
     EXIT_CODES,
     CliTyper,
     error_payload,
-    machine_from_argv,
+    fail_usage,
+    initialize_mode,
+    machine_mode,
+    warn,
 )
 from ffinfo_cli.list.bookmarks import BookmarksReport
 from ffinfo_cli.list.tabs import TabsReport
@@ -215,18 +218,46 @@ def test_completion_ignores_machine_mode() -> None:
     assert not result.stdout.lstrip().startswith("{")
 
 
-@pytest.mark.parametrize(
-    ("argv", "expected"),
-    [
-        (["-j", "sync"], True),
-        (["sync", "--json"], True),
-        (["sync", "--nope"], False),
-        ([], False),
-    ],
-)
-def test_machine_from_argv_scans_the_json_flag(argv: list[str], expected: bool) -> None:
-    """解析失败路径的模式判定：只看 argv 里有没有 ``-j`` / ``--json``。"""
-    assert machine_from_argv(argv) is expected
+def test_initialize_mode_is_the_single_store_for_machine_mode() -> None:
+    """模式只有一个权威存储：初始化器写 ``argv`` 的结论，读出来就是这次的值。
+
+    成功渲染与失败/警告 emit 都经 ``machine_mode()`` 读它 —— 没有 ``ctx.obj`` /
+    模块全局那两份互相刷的副本（``set_machine`` 双写已删）。
+    """
+    initialize_mode(["sync", "-j"])
+    assert machine_mode() is True
+
+    initialize_mode(["sync"])
+    assert machine_mode() is False
+
+
+@pytest.mark.parametrize("machine", [False, True])
+def test_warn_and_fail_forms_follow_one_mode_initialization(
+    machine: bool, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """一次模式初始化同时管住警告与错误 —— 两条 emit 路径读的是同一个值。
+
+    表征既有契约：人读是 ``警告：…`` / ``错误：…`` 各一行；``-j`` 时各是一行 JSON；
+    ``fail_usage`` 的退出码两种模式一致（2）。
+    """
+    initialize_mode(["-j"] if machine else [])
+
+    warn("老库收敛了 1 条重复记录")
+    with pytest.raises(typer.Exit) as excinfo:
+        fail_usage("看不懂的选项")
+
+    captured = capsys.readouterr()
+    assert excinfo.value.exit_code == 2
+    assert captured.out == ""
+    if machine:
+        warning, error = (json.loads(line) for line in captured.err.splitlines())
+        assert warning == {"warning": {"message": "老库收敛了 1 条重复记录"}}
+        assert error == {"error": {"code": "usage", "message": "看不懂的选项"}}
+    else:
+        assert captured.err.splitlines() == [
+            "警告：老库收敛了 1 条重复记录",
+            "错误：看不懂的选项",
+        ]
 
 
 class _Color(enum.Enum):

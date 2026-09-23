@@ -17,7 +17,7 @@ from ffinfo.bookmarks import BookmarkNode, parse_bookmarks
 from ffinfo.crypto import KeyBundle
 from ffinfo.errors import ConfigurationError
 from ffinfo.tabs import parse_tabs
-from ffinfo_cli.failures import fail_usage, guard, warn
+from ffinfo_cli.failures import fail_usage, guard, machine_mode, warn
 from ffinfo_cli.list import (
     completion_values,
     list_bookmarks_blocking,
@@ -95,7 +95,6 @@ def _parsed_since(since: str | None) -> datetime | None:
 
 
 def history(
-    ctx: typer.Context,
     since: str | None = typer.Option(
         None,
         "--since",
@@ -123,11 +122,10 @@ def history(
         )
     )
 
-    typer.echo(render(report, machine=bool(ctx.obj)))
+    typer.echo(render(report, machine=machine_mode()))
 
 
 def bookmarks(
-    ctx: typer.Context,
     path: str | None = typer.Option(
         None,
         "--path",
@@ -149,11 +147,10 @@ def bookmarks(
         )
     )
 
-    typer.echo(render(report, machine=bool(ctx.obj)))
+    typer.echo(render(report, machine=machine_mode()))
 
 
 def tabs(
-    ctx: typer.Context,
     device: str | None = typer.Option(
         None,
         "--device",
@@ -175,7 +172,7 @@ def tabs(
         )
     )
 
-    typer.echo(render(report, machine=bool(ctx.obj)))
+    typer.echo(render(report, machine=machine_mode()))
 
 
 def register(app: typer.Typer) -> None:

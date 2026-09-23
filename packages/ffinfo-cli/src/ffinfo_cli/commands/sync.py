@@ -7,7 +7,7 @@ from typing import Final
 
 import typer
 
-from ffinfo_cli.failures import fail_usage, guard, warn
+from ffinfo_cli.failures import fail_usage, guard, machine_mode, warn
 from ffinfo_cli.paths import credentials_path, database_path, identity_path
 from ffinfo_cli.progress import reporter_for
 from ffinfo_cli.render import render
@@ -18,7 +18,6 @@ _MAX_PAGE_SIZE: Final = 100
 
 
 def sync(
-    ctx: typer.Context,
     page_size: int = typer.Option(100, "--page-size", help="每页拉多少条（服务器上限 100）"),
     full: bool = typer.Option(
         False,
@@ -41,7 +40,7 @@ def sync(
     if not 1 <= page_size <= _MAX_PAGE_SIZE:
         fail_usage(f"--page-size 要在 1..{_MAX_PAGE_SIZE} 之间（服务器上限），收到 {page_size}")
 
-    machine = bool(ctx.obj)
+    machine = machine_mode()
     reporter = reporter_for(sys.stderr, enabled=progress if progress is not None else not machine)
     try:
         report = guard(

@@ -580,14 +580,17 @@ dispatcher（改为 `run_history` / `run_bookmarks` / `run_tabs` 与对应 `list
   **序列化不再散在各报告 module** —— §9.1 里 `list/report.py` 只留 union 别名。
 
 **`-j / --json`**：root callback 上的全局选项，写在子命令**之前**（`ffinfo-cli -j sync` /
-`ffinfo-cli -j list history`）；各命令从 `ctx.obj` 读已解析的模式。**默认人读**。
+`ffinfo-cli -j list history`）；**默认人读**。模式是**一个值**：`failures.initialize_mode`
+在 `_UsageAwareGroup.main` 进门时（Click 解析前）从 argv 扫一遍存下 —— 唯一写入点；
+成功渲染 `render(..., machine=machine_mode())` 与失败/警告 emit 读同一份，
+不再经 `ctx.obj` 落第二份副本。
 
 **`-j` 隐含关进度**：`sync` 的 `--progress` 默认从 `True` 改成"未指定"，在 callback 里按模式解析
 （`-j` 时默认关，显式 `--progress` 仍开）—— agent 的 stderr 上不能混进进度行。
 
 **错误与警告跟随模式**：默认 stderr 是 `错误：…`（人读），`-j` 时才是 stderr JSON。
 **退出码分档不变**（另有用户中断 **130 / `aborted`**，表在 `README.md`）。
-`_fail` / `_fail_usage` / `_warn` / `_emit_error` 接上已解析的模式；
+`fail` / `fail_usage` / `warn` / `emit_error` 经 `machine_mode()` 读同一个模式值；
 `README.md` 那张表加一句「错误 JSON 只在 `-j` 时」。
 `-j login` **成功**也经同一 `render` seam 出 JSON（`LoginReport`），不再散文。
 
@@ -694,9 +697,10 @@ except click.UsageError as exc:
     # 按模式渲染 + sys.exit(exc.exit_code)  # 默认 2
 ```
 
-- 模式判定：进入 `main()` 前先扫一遍 `args` 里的 `-j` / `--json`（best-effort —— 解析失败时
-  callback 没跑、`ctx.obj` 为空；扫不到就人读）。
-- 放 `ffinfo_cli/failures.py`，与 `_fail_usage` 同处；`cli.py` 用它建 app。
+- 模式判定：进入 `main()` 时扫一遍 `args` 里的 `-j` / `--json`，存进唯一的模式值
+  （`failures.initialize_mode` —— argv 扫描就是初始化器，不是与 root callback 竞争的
+  第二份副本；解析失败时 callback 没跑也照常有效，扫不到就人读）。
+- 放 `ffinfo_cli/failures.py`，与 `fail_usage` 同处；`cli.py` 用它建 app。
   三个失败来源（命令体校验 / 解析错误 / 兜底异常）的渲染走同一条路。
 
 **边界**：

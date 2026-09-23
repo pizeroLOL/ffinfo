@@ -10,7 +10,7 @@ from typing import Final
 
 import typer
 
-from ffinfo_cli.failures import fail_usage, guard, warn
+from ffinfo_cli.failures import fail_usage, guard, machine_mode, warn
 from ffinfo_cli.paths import database_path
 from ffinfo_cli.places import HostContext, discover_profiles
 from ffinfo_cli.render import render
@@ -52,7 +52,6 @@ _PROFILE: Final = typer.Option(
 
 
 def export(
-    ctx: typer.Context,
     destination: Path = _DESTINATION,
     profile: Path | None = _PROFILE,
 ) -> None:
@@ -70,11 +69,10 @@ def export(
         )
     )
 
-    typer.echo(render(report, machine=bool(ctx.obj)))
+    typer.echo(render(report, machine=machine_mode()))
 
 
 def import_command(
-    ctx: typer.Context,
     source: Path | None = _SOURCE,
     from_firefox: bool = typer.Option(
         False,
@@ -107,7 +105,7 @@ def import_command(
         lambda: import_blocking(database_path=database_path(), input=import_input, warn=warn)
     )
 
-    typer.echo(render(report, machine=bool(ctx.obj)))
+    typer.echo(render(report, machine=machine_mode()))
     for warning in report.warnings:
         warn(warning)
 
