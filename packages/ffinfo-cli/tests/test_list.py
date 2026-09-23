@@ -34,6 +34,7 @@ from ffinfo_cli.list import (
     matches_search,
     parse_since,
 )
+from ffinfo_cli.list.common import ShellCommon, load_shell
 from ffinfo_cli.render import render
 from ffinfo_cli.store import (
     CollectionBatch,
@@ -288,6 +289,27 @@ async def test_output_carries_format_version_and_filters(tmp_path: Path) -> None
     assert payload["filters"]["domain"] == "example.com"
     assert payload["filters"]["limit"] is None
     assert payload["generated_at"] == "2026-09-13T17:30:12+00:00"
+
+
+async def test_load_shell_yields_typed_common_fields(tmp_path: Path) -> None:
+    """``load_shell`` 的公共字段是**有类型的值** —— 按属性断言齐全，不是字符串键 dict。"""
+    await build_db(tmp_path, [history_record("rec")])
+
+    shell = await load_shell(
+        database_path=tmp_path / "db.sqlite",
+        collection="history",
+        filters={"limit": 5},
+        warn=None,
+        clock=lambda: NOW,
+    )
+
+    assert isinstance(shell.common, ShellCommon)
+    assert shell.common.generated_at == "2026-09-13T17:30:12+00:00"
+    assert shell.common.data_type == "history"
+    assert shell.common.synced_at is None
+    assert shell.common.age_seconds is None
+    assert shell.common.filters == {"limit": 5}
+    assert shell.common.records == 1
 
 
 async def test_never_synced_says_so_instead_of_pretending(tmp_path: Path) -> None:

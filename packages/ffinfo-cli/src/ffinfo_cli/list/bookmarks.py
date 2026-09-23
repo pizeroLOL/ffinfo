@@ -11,13 +11,14 @@ import asyncio
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict
 
 from ffinfo.bookmarks import BookmarkNode, parse_bookmarks
 from ffinfo.crypto import KeyBundle
 from ffinfo_cli.list.common import (
+    ShellCommon,
     SourceName,
     cloud_key,
     details,
@@ -96,7 +97,7 @@ async def run_bookmarks(
 def _bookmark_report(
     records: Sequence[tuple[str, str | None]],
     key: KeyBundle,
-    common: dict[str, Any],
+    common: ShellCommon,
     *,
     path: str | None,
     limit: int | None,
@@ -125,7 +126,12 @@ def _bookmark_report(
     not_in_tree = decrypted.skipped + decrypted.dropped
 
     return BookmarksReport(
-        **common,
+        generated_at=common.generated_at,
+        data_type=common.data_type,
+        synced_at=common.synced_at,
+        age_seconds=common.age_seconds,
+        filters=common.filters,
+        records=common.records,
         skipped=len(not_in_tree),
         skipped_details=details(not_in_tree),
         notes=notes,

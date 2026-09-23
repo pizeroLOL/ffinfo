@@ -6,7 +6,7 @@
 * ``SourceName`` / ``VisitSource`` 这两个给 agent 的契约类型；
 * ``parse_since`` 与 ``matches_domain`` / ``matches_search`` 这两个过滤口径；
 * ``keeper`` / ``truncate`` / ``guard_all_failed`` / ``details`` 这些共享谓词；
-* ``load_shell`` —— 读库、读 firefox 源、拼报告里的公共字段；
+* ``load_shell`` —— 读库、读 firefox 源、拼报告里的公共字段（有类型的 ``ShellCommon``）；
 * ``cloud_key`` —— 只在确实要解密云端记录时才加载凭据。
 
 两个约定，别混：
@@ -49,13 +49,30 @@ type SourceName = Literal["sync", "firefox"]
 
 
 @dataclass(frozen=True, slots=True)
+class ShellCommon:
+    """三份 list 报告在壳层共有的那组字段 —— ``load_shell`` 产出、报告构造函数显式接收。
+
+    每个字段与三份报告模型上的**同名**字段一一对应；消费侧 ``common.x`` 与构造侧
+    ``x=…`` 两头都过 pyright —— 拼错或改名在类型检查期就红，不再是运行时才炸。
+    **这不是报告基类**（design §9.1）：报告模型互不继承，这里只是它们共有的构造输入。
+    """
+
+    generated_at: str
+    data_type: str
+    synced_at: str | None
+    age_seconds: float | None
+    filters: dict[str, str | int | None]
+    records: int
+
+
+@dataclass(frozen=True, slots=True)
 class Shell:
     """一次 ``list`` 查询的公共外壳：库句柄、记录、firefox 源、报告公共字段。"""
 
     store: Store
     records: Sequence[tuple[str, str | None]]
     firefox: Sequence[StoredVisit]
-    common: dict[str, Any]
+    common: ShellCommon
 
 
 async def load_shell(
@@ -66,7 +83,7 @@ async def load_shell(
     warn: Callable[[str], None] | None,
     clock: Callable[[], float],
 ) -> Shell:
-    """读库、读 firefox 源、拼出报告公共字段 —— 三个入口唯一会重复的一步。
+    """读库、读 firefox 源、拼出报告公共字段（``ShellCommon``）—— 三个入口唯一会重复的一步。
 
     ``filters`` 是**这个类型自己的键**（history 是 ``since`` / ``domain`` / ``search`` / ``limit``，
     bookmarks 是 ``path`` / ``limit``，tabs 是 ``device`` / ``limit``）—— 口径由各自的入口拼。
@@ -80,18 +97,18 @@ async def load_shell(
         (item for item in await store.load_cursors() if item.collection == collection), None
     )
     now = clock()
-    common: dict[str, Any] = {
-        "generated_at": datetime.fromtimestamp(now, tz=UTC).isoformat(),
-        "data_type": collection,
-        "synced_at": (
+    common = ShellCommon(
+        generated_at=datetime.fromtimestamp(now, tz=UTC).isoformat(),
+        data_type=collection,
+        synced_at=(
             datetime.fromtimestamp(cursor.synced_at, tz=UTC).isoformat()
             if cursor is not None
             else None
         ),
-        "age_seconds": round(now - cursor.synced_at, 1) if cursor is not None else None,
-        "filters": filters,
-        "records": len(records),
-    }
+        age_seconds=round(now - cursor.synced_at, 1) if cursor is not None else None,
+        filters=filters,
+        records=len(records),
+    )
     return Shell(store=store, records=records, firefox=firefox, common=common)
 
 

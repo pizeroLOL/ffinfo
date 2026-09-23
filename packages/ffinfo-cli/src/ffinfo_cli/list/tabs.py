@@ -11,13 +11,14 @@ import asyncio
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict
 
 from ffinfo.crypto import KeyBundle
 from ffinfo.tabs import ClientTabs, parse_tabs
 from ffinfo_cli.list.common import (
+    ShellCommon,
     SourceName,
     cloud_key,
     details,
@@ -93,7 +94,7 @@ async def run_tabs(
 def _tabs_report(
     records: Sequence[tuple[str, str | None]],
     key: KeyBundle,
-    common: dict[str, Any],
+    common: ShellCommon,
     *,
     device: str | None,
     limit: int | None,
@@ -124,7 +125,12 @@ def _tabs_report(
         clients = trimmed
 
     return TabsReport(
-        **common,
+        generated_at=common.generated_at,
+        data_type=common.data_type,
+        synced_at=common.synced_at,
+        age_seconds=common.age_seconds,
+        filters=common.filters,
+        records=common.records,
         skipped=len(decrypted.skipped),
         skipped_details=details(decrypted.skipped),
         notes=notes,

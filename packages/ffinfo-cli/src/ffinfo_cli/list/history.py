@@ -15,7 +15,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict
 
@@ -23,6 +23,7 @@ from ffinfo.crypto import KeyBundle
 from ffinfo.history import DecryptionReport, HistoryEntry, decrypt_history, visit_type_name
 from ffinfo.timestamps import to_microseconds
 from ffinfo_cli.list.common import (
+    ShellCommon,
     SourceName,
     VisitSource,
     cloud_key,
@@ -150,7 +151,7 @@ def _history_report(
     records: Sequence[tuple[str, str | None]],
     key: KeyBundle | None,
     firefox: Sequence[StoredVisit],
-    common: dict[str, Any],
+    common: ShellCommon,
     *,
     since: datetime | None,
     domain: str | None,
@@ -179,7 +180,12 @@ def _history_report(
 
     returned = truncate(selected, limit)
     return HistoryReport(
-        **common,
+        generated_at=common.generated_at,
+        data_type=common.data_type,
+        synced_at=common.synced_at,
+        age_seconds=common.age_seconds,
+        filters=common.filters,
+        records=common.records,
         visits=len(decrypted.entries),
         firefox_records=len(firefox),
         sources=_sources(len(decrypted.entries), len(firefox)),
