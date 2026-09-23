@@ -39,6 +39,7 @@ from ffinfo.errors import (
 )
 
 __all__ = [
+    "EXIT_CODES",
     "CliTyper",
     "emit_error",
     "error_payload",
@@ -61,7 +62,7 @@ def set_machine(machine: bool) -> None:
     _machine = machine
 
 
-_EXIT_CODES: Final[tuple[tuple[type[FfinfoError], int, str], ...]] = (
+EXIT_CODES: Final[tuple[tuple[type[FfinfoError], int, str], ...]] = (
     (ConfigurationError, 3, "configuration"),
     (AuthError, 4, "auth"),
     (BackoffError, 5, "backoff"),
@@ -74,7 +75,7 @@ _EXIT_CODES: Final[tuple[tuple[type[FfinfoError], int, str], ...]] = (
 
 def error_payload(exc: FfinfoError) -> tuple[int, dict[str, Any]]:
     """异常 → (退出码, 错误 JSON)。没登记的异常落到兜底档 —— 消息绝不丢。"""
-    for klass, code, name in _EXIT_CODES:
+    for klass, code, name in EXIT_CODES:
         if isinstance(exc, klass):
             error: dict[str, Any] = {"code": name, "message": str(exc)}
             if isinstance(exc, BackoffError):

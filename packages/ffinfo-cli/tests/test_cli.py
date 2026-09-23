@@ -30,7 +30,12 @@ from ffinfo.oauth import Credentials
 from ffinfo.storage import FetchProgress
 from ffinfo.tabs import ClientTabs, TabEntry
 from ffinfo_cli.cli import app
-from ffinfo_cli.failures import CliTyper, error_payload, machine_from_argv
+from ffinfo_cli.failures import (
+    EXIT_CODES,
+    CliTyper,
+    error_payload,
+    machine_from_argv,
+)
 from ffinfo_cli.list.bookmarks import BookmarksReport
 from ffinfo_cli.list.tabs import TabsReport
 from ffinfo_cli.sync import CollectedSync, SyncReport
@@ -73,6 +78,26 @@ def test_unknown_error_falls_back_but_keeps_the_message() -> None:
         pass
 
     assert error_payload(Weird("没见过")) == (1, {"error": {"code": "error", "message": "没见过"}})
+
+
+def test_readme_exit_code_table_matches_failures_module() -> None:
+    """README 退出码表与 ``failures`` 同源 —— 漏一行 / 改错码就红。
+
+    表是给 agent 的契约；代码里的 ``EXIT_CODES`` + ``fail_usage`` / ``fail_abort``
+    兜底才是真源。两边 ``(退出码, code)`` 集合必须一致（``0`` 成功行无 code，排除）。
+    """
+    import re
+    from pathlib import Path
+
+    readme = (Path(__file__).resolve().parents[3] / "README.md").read_text(encoding="utf-8")
+    from_table = {
+        (int(m.group(1)), m.group(2))
+        for m in re.finditer(r"^\| (\d+) \| `(\w+)` \|", readme, re.MULTILINE)
+    }
+    from_code = {(code, name) for _, code, name in EXIT_CODES}
+    from_code |= {(1, "error"), (2, "usage"), (130, "aborted")}
+
+    assert from_table == from_code
 
 
 @pytest.mark.parametrize(
@@ -177,11 +202,16 @@ def test_eager_exits_ignore_machine_mode(argv: list[str]) -> None:
 
 
 def test_completion_ignores_machine_mode() -> None:
-    """补全命令同样走 ``Exit`` —— 带 ``-j`` 也不变成 JSON。"""
+    """补全命令同样走 ``Exit`` —— 带 ``-j`` 也不变成 JSON。
+
+    依赖 ``conftest`` 里钉的 ``_TYPER_COMPLETE_TEST_DISABLE_SHELL_DETECTION``：
+    否则 ``--show-completion`` 是 bool flag，argv 的 ``bash`` 被丢掉、改走
+    shellingham 进程树探测 —— pre-push 下父进程不是 shell 会假红。
+    """
     result = runner.invoke(app, ["-j", "--show-completion", "bash"])
 
     assert result.exit_code == 0, result.stderr
-    assert result.stdout.strip()
+    assert result.stdout.startswith("_ffinfo_cli_completion")
     assert not result.stdout.lstrip().startswith("{")
 
 
@@ -600,11 +630,11 @@ def test_short_help_flag_works() -> None:
 
 
 def test_completion_script_is_available() -> None:
-    """``--show-completion`` 能吐出补全脚本 —— bash 补全的入口。"""
+    """``--show-completion bash`` 吐 bash 补全脚本 —— 认 argv 里的 shell 名，不靠进程树探测。"""
     result = runner.invoke(app, ["--show-completion", "bash"])
 
-    assert result.exit_code == 0
-    assert result.stdout.strip()
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout.startswith("_ffinfo_cli_completion")
 
 
 def shell_completions(*args: str, incomplete: str) -> set[str]:

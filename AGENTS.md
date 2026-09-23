@@ -17,34 +17,25 @@
 
 ## 开发命令
 
+**全表见 [`README.md`](README.md)「开发」** —— ruff / format / pyright / pytest / prek 那一组。
+agent 日常只需要：
+
 ```bash
 uv sync                                   # 装依赖（含两个 workspace 成员）
-uv run ruff check .                       # lint
-uv run ruff format .                      # format
-uv run pyright --project pyproject.toml   # 类型检查（strict）
 uv run pytest                             # 测试（自带 --cov，覆盖率 ≥90 才过）
-uv run prek install                       # 装 commit 钩子（ruff / 格式 / pyright）
-uv run prek install --hook-type pre-push  # 装 push 钩子（跑 pytest）
+uv run prek install && uv run prek install --hook-type pre-push  # 钩子；检查：
+test -f .git/hooks/pre-commit && test -f .git/hooks/pre-push
 ```
 
-> ⚠️ **`pyright` 必须带 `--project pyproject.toml`。**
-> pyright 会向上遍历目录找 `pyrightconfig.json`，**优先于**本地的 `pyproject.toml`。
-> 如果祖先目录里恰好有一个，裸跑 `pyright` 会去扫别人的代码。
-> 在干净的环境里裸跑没问题，但带上参数永远安全。
+> ⚠️ **`pyright` 必须带 `--project pyproject.toml`**（防扫到祖先 `pyrightconfig.json`）；
+> **`include` 不能写通配**（pyright 会静默 0 文件）。两条的完整解释在
+> [`pyproject.toml`](pyproject.toml) `[tool.pyright]` 注释里 —— 改配置只看那里。
 >
-> 📌 `include` 里**不能写通配**（pyright 不认，会静默地一个文件都不分析）—— 写死目录。
-> 依赖没有类型信息带来的 unknown 系列（pyrage / piccolo）**已豁免**，见 `pyproject.toml`
-> 里的注释；补存根后把豁免开回来（记在待办里）。
-
-> **git 钩子用 [prek](https://github.com/j178/prek)** —— pre-commit 的 Rust 替代，
-> 读同一份 `.pre-commit-config.yaml`。ruff / ruff-format / pyright 都走 **local 钩子**：
-> 跑的就是 `uv run` 那一份，不会像钉死 rev 的钩子那样跟 `pyproject.toml` 漂开。
+> **git 钩子用 [prek](https://github.com/j178/prek)**，读同一份 `.pre-commit-config.yaml`：
+> `pre-commit` 挡 ruff / 格式 / pyright；`pre-push` 才跑 `pytest`。三平台矩阵以 CI 为准。
 >
-> **开工第一件事**：确认钩子装好了 —— 没装就先
-> `uv run prek install && uv run prek install --hook-type pre-push`
-> （检查方式：`test -f .git/hooks/pre-commit && test -f .git/hooks/pre-push`）。
-> `pre-commit` 阶段挡 ruff / ruff-format / pyright；`pre-push` 阶段才跑 `pytest`
-> （只有 pytest 钉在 push，见 `.pre-commit-config.yaml`）。三平台矩阵仍以 CI 为准。
+> push 被 `pytest` 拦下时：先同命令本地重跑，分清真红还是环境 flake，再决定重推 ——
+> 判据见 [`CODING_STANDARDS.md`](CODING_STANDARDS.md)。
 
 ## 多 agent 并行：一票一 worktree
 

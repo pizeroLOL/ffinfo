@@ -28,6 +28,17 @@
 
 没碰这些面的纯内部改动：不必为了「好像该写」去扩 design。
 
+## pre-push 红了：先分清真红 / flake
+
+`git push` 被 `pytest` 钩子拦下时，**不要**原样重推当诊断：
+
+1. 同一命令本地重跑：`uv run pytest -q`
+2. 两次结果不一致，或只有环境敏感用例挂（补全 / 终端探测 / 时区）→ 按 flake 查
+   （见 `packages/ffinfo-cli/tests/conftest.py` 对 typer shell 探测的钉扎）
+3. **同一签名连续两次本地也红** → 当真失败，修完再 push
+
+重推只允许发生在「已确认是 flake、且根因有钉扎」之后；根因未钉死就重试 = review 打回。
+
 ## 表征测试与命名
 
 - 翻转 `test_current_*`（或同类「钉现状」测试）后，**函数名与 docstring 必须描述新行为**。
