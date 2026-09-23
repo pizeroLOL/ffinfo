@@ -20,7 +20,7 @@ import pytest
 
 from ffinfo.errors import ConfigurationError
 from ffinfo.storage import EncryptedBso
-from ffinfo_cli.portable import PortableCursor
+from ffinfo_cli.portable import PortableCursor, PortableRecord
 from ffinfo_cli.store import (
     CollectionBatch,
     SyncRecord,
@@ -217,6 +217,94 @@ async def test_incremental_ignores_an_older_record(tmp_path: Path) -> None:
     assert results["history"].updated == 0
     rows = await SyncRecord.select()
     assert rows[0]["payload"] == "encrypted"
+
+
+async def test_incremental_tombstone_deletes_but_untouched_key_stays(tmp_path: Path) -> None:
+    """增量墓碑：命中已有行才删；同批没见过的键一行不动。"""
+    store = await open_database(tmp_path / "db.sqlite")
+    await store.replace_collection("history", [record("a"), record("b")])
+
+    results = await store.commit(
+        [
+            CollectionBatch(
+                collection="history",
+                records=[record("a", modified=9.0, payload=None)],
+                full=False,
+            )
+        ],
+        (),
+    )
+
+    assert results["history"].deleted == 1
+    assert [row["record_id"] for row in await SyncRecord.select()] == ["b"]
+
+
+async def test_import_keeps_tombstones_and_stale_records(tmp_path: Path) -> None:
+    """import 墓碑处置 = ``kept``：不删行、不写空记录，账计在 kept 里。"""
+    store = await open_database(tmp_path / "db.sqlite")
+    await store.replace_collection("history", [record("a", modified=5.0)])
+
+    applied, kept = await store.merge_sync_records(
+        [
+            portable_record("a", modified=1.0),
+            portable_record("gone", modified=9.0, payload=None),
+        ]
+    )
+
+    assert applied.inserted == 0
+    assert applied.updated == 0
+    assert applied.deleted == 0
+    assert kept == 2
+    rows = await SyncRecord.select()
+    assert [(row["record_id"], row["payload"]) for row in rows] == [("a", "encrypted")]
+
+
+async def test_import_inserts_new_and_updates_only_when_newer(tmp_path: Path) -> None:
+    """import 覆盖判定：新键插入、更旧的保住、更新的覆盖。"""
+    store = await open_database(tmp_path / "db.sqlite")
+    await store.replace_collection(
+        "history", [record("stale", modified=5.0), record("fresher", modified=5.0)]
+    )
+
+    applied, kept = await store.merge_sync_records(
+        [
+            portable_record("stale", modified=1.0),
+            portable_record("fresher", modified=9.0),
+            portable_record("brand-new", modified=1.0),
+        ]
+    )
+
+    assert applied.inserted == 1
+    assert applied.updated == 1
+    assert kept == 1
+    payloads = {
+        str(row["record_id"]): row["payload"]
+        for row in await SyncRecord.select().order_by(SyncRecord.record_id)
+    }
+    assert payloads == {
+        "brand-new": "encrypted",
+        "fresher": "encrypted",
+        "stale": "encrypted",
+    }
+    fresher = await SyncRecord.select().where(SyncRecord.record_id == "fresher")
+    assert float(fresher[0]["modified"]) == 9.0
+
+
+def portable_record(
+    record_id: str,
+    *,
+    modified: float = 1.0,
+    payload: str | None = "encrypted",
+) -> PortableRecord:
+    """造一条便携文件形态的记录。"""
+    return PortableRecord(
+        collection="history",
+        record_id=record_id,
+        modified=modified,
+        payload=payload,
+        sortindex=None,
+        ttl=None,
+    )
 
 
 async def test_record_identity_is_enforced_by_the_database(tmp_path: Path) -> None:

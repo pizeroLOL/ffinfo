@@ -35,6 +35,7 @@ from piccolo.table import Table
 from ffinfo.errors import ConfigurationError
 from ffinfo.storage import EncryptedBso
 from ffinfo.timestamps import from_microseconds, to_microseconds
+from ffinfo_cli.merge_policy import plan_sync_writes
 from ffinfo_cli.portable import PortableCursor, PortableRecord
 
 __all__ = [
@@ -273,24 +274,32 @@ class Store:
         ``deleted`` 报的是**真的没了的那部分**（老行里没被重插的）—— ``--full`` 的对账
         就靠它：agent 问"全量之后什么被删了"，答案不能永远是 0。
 
-        同一批里同 id 出现多次时与增量一样只认最新的一条（跨页重复不该把整次同步打翻）。
+        覆盖判定走 :func:`plan_sync_writes`（``disposition="filter"``）：同批同 id 折到
+        最新、墓碑筛出存活集；**存活集就是新全集**，不在里面的已有行进 ``deletes``
+        （对账口径），存活的不管 ``modified`` 旧不旧都写 —— 全量以这一批为准。
         """
-        live = [record for record in _newest_per_id(records) if record.payload is not None]
-        rows = [_row(collection, record) for record in live]
-        after = {record.id for record in live}
-        before = {
-            str(row["record_id"])
+        existing = {
+            str(row["record_id"]): float(row["modified"])
             for row in await self._run(
-                SyncRecord.select(SyncRecord.record_id).where(SyncRecord.collection == collection)
+                SyncRecord.select(SyncRecord.record_id, SyncRecord.modified).where(
+                    SyncRecord.collection == collection
+                )
             )
         }
+        plan = plan_sync_writes(
+            records,
+            existing,
+            key_of=lambda record: record.id,
+            disposition="filter",
+        )
+        rows = [_row(collection, record) for record in plan.live]
         await self._run(SyncRecord.delete().where(SyncRecord.collection == collection))
         if rows:
             await self._insert_rows(SyncRecord, rows)
         return ApplyResult(
-            inserted=len(after - before),
-            updated=len(after & before),
-            deleted=len(before - after),
+            inserted=len(plan.inserts),
+            updated=len(plan.updates),
+            deleted=len(plan.deletes),
         )
 
     async def _apply(self, collection: str, records: Sequence[EncryptedBso]) -> ApplyResult:
@@ -299,9 +308,9 @@ class Store:
         增量拉回来的只是**变更集**，所以不能像全量那样"删了重插" ——
         那会把没变更的几千条一起端掉。
 
-        **只在 ``modified`` 更新时才覆盖**：变更集里混进一条旧的（服务器重发、
-        两份导出交叉）不能把库里的新数据盖回去。同一批里同 id 出现多次时，
-        只有最新的那条算数 —— 库里的唯一索引不接受两行。
+        覆盖判定走 :func:`plan_sync_writes`（``disposition="delete"``）：只在
+        ``modified`` 更大时才覆盖（变更集里混进旧的不能盖掉库里的新数据），
+        同批同 id 折到最新，墓碑命中已有行才删。
         """
         existing = {
             str(row["record_id"]): (int(row["id"]), float(row["modified"]))
@@ -311,19 +320,16 @@ class Store:
                 )
             )
         }
+        plan = plan_sync_writes(
+            records,
+            {key: modified for key, (_, modified) in existing.items()},
+            key_of=lambda record: record.id,
+            disposition="delete",
+        )
 
-        fresh: list[SyncRecord] = []
-        updates: list[tuple[int, EncryptedBso]] = []
-        removals: list[int] = []
-        for record in _newest_per_id(records):
-            entry = existing.get(record.id)
-            if record.payload is None:
-                if entry is not None:
-                    removals.append(entry[0])
-            elif entry is None:
-                fresh.append(_row(collection, record))
-            elif record.modified > entry[1]:
-                updates.append((entry[0], record))
+        fresh = [_row(collection, record) for record in plan.inserts]
+        updates = [(existing[record.id][0], record) for record in plan.updates]
+        removals = [existing[key][0] for key in plan.deletes]
 
         if fresh:
             await self._insert_rows(SyncRecord, fresh)
@@ -473,11 +479,9 @@ class Store:
     ) -> tuple[ApplyResult, int]:
         """把导出来的云端记录并进库。返回 ``(落库的账, 被保住没动的条数)``。
 
-        **只在导出的那条更新时才覆盖。** 目标机器可能自己 sync 过、比这份导出还新 ——
-        拿旧数据把新数据盖回去是不可逆的损失，所以这里认 ``modified``，不是无脑 upsert。
-
-        墓碑（``payload`` 为 ``None``）直接跳过：库里的约定是"有行 == 这条记录存在"
-        （见本模块开头的说明），收下一条空记录会把这个约定捅破。
+        覆盖判定走 :func:`plan_sync_writes`（``disposition="keep"``）：**只在导出的那条
+        更新时才覆盖** —— 目标机器可能自己 sync 过、比这份导出还新。同份导出里同键
+        出现多次折到最新；墓碑与陈数据都计进 ``kept``（不删、不写）。
         """
         existing = {
             (str(row["collection"]), str(row["record_id"])): float(row["modified"])
@@ -485,34 +489,28 @@ class Store:
                 SyncRecord.select(SyncRecord.collection, SyncRecord.record_id, SyncRecord.modified)
             )
         }
+        plan = plan_sync_writes(
+            records,
+            existing,
+            key_of=lambda item: (item.collection, item.record_id),
+            disposition="keep",
+        )
 
-        fresh: list[SyncRecord] = []
-        updates: list[PortableRecord] = []
-        kept = 0
-        for item in _newest_per_record(records):
-            if item.payload is None:
-                kept += 1
-                continue
-            current = existing.get((item.collection, item.record_id))
-            if current is None:
-                fresh.append(
-                    SyncRecord(
-                        collection=item.collection,
-                        record_id=item.record_id,
-                        modified=item.modified,
-                        payload=item.payload,
-                        sortindex=item.sortindex,
-                        ttl=item.ttl,
-                    )
-                )
-            elif item.modified > current:
-                updates.append(item)
-            else:
-                kept += 1
+        fresh = [
+            SyncRecord(
+                collection=item.collection,
+                record_id=item.record_id,
+                modified=item.modified,
+                payload=item.payload,
+                sortindex=item.sortindex,
+                ttl=item.ttl,
+            )
+            for item in plan.inserts
+        ]
 
         if fresh:
             await self._insert_rows(SyncRecord, fresh)
-        for item in updates:
+        for item in plan.updates:
             await self._run(
                 SyncRecord.update(
                     {
@@ -527,7 +525,10 @@ class Store:
                 )
             )
 
-        return ApplyResult(inserted=len(fresh), updated=len(updates), deleted=0), kept
+        return (
+            ApplyResult(inserted=len(fresh), updated=len(plan.updates), deleted=0),
+            len(plan.kept),
+        )
 
     @_guard_store
     async def load_all_records(self) -> tuple[PortableRecord, ...]:
@@ -790,20 +791,6 @@ piccolo 把整批拼成一条多值 ``INSERT``，变量数 = 行数 × 列数；
 """
 
 
-def _newest_per_id(records: Sequence[EncryptedBso]) -> list[EncryptedBso]:
-    """同一批里同 id 出现多次时只留最新的（``modified`` 大者胜，平手留后面的）。
-
-    服务器理论上不会这么发，但真发了也不该插出两行 —— 唯一索引会拒绝，
-    那是比"静默丢一条"更响的失败，只是没必要走到那一步。
-    """
-    newest: dict[str, EncryptedBso] = {}
-    for record in records:
-        current = newest.get(record.id)
-        if current is None or record.modified >= current.modified:
-            newest[record.id] = record
-    return list(newest.values())
-
-
 def _row(collection: str, record: EncryptedBso) -> SyncRecord:
     """一条记录 → 一行。"""
     return SyncRecord(
@@ -814,17 +801,3 @@ def _row(collection: str, record: EncryptedBso) -> SyncRecord:
         sortindex=record.sortindex,
         ttl=record.ttl,
     )
-
-
-def _newest_per_record(records: Sequence[PortableRecord]) -> list[PortableRecord]:
-    """同一份导出里 ``(collection, record_id)`` 出现多次时只留最新的。
-
-    唯一索引不接受两行同 id —— 别让文件里的重复把整次导入打翻。
-    """
-    newest: dict[tuple[str, str], PortableRecord] = {}
-    for item in records:
-        key = (item.collection, item.record_id)
-        current = newest.get(key)
-        if current is None or item.modified >= current.modified:
-            newest[key] = item
-    return list(newest.values())
