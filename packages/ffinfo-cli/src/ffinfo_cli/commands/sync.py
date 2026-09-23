@@ -11,7 +11,8 @@ from ffinfo_cli.failures import fail_usage, guard, machine_mode, warn
 from ffinfo_cli.paths import credentials_path, database_path, identity_path
 from ffinfo_cli.progress import reporter_for
 from ffinfo_cli.render import render
-from ffinfo_cli.sync import SYNCABLE_COLLECTIONS, sync_blocking
+from ffinfo_cli.runner import run_with_http
+from ffinfo_cli.sync import SYNCABLE_COLLECTIONS, run_sync
 
 _MAX_PAGE_SIZE: Final = 100
 """服务器每页的上限 —— ``--page-size`` 越界会被**拒**，不是静默夹取。"""
@@ -44,15 +45,18 @@ def sync(
     reporter = reporter_for(sys.stderr, enabled=progress if progress is not None else not machine)
     try:
         report = guard(
-            lambda: sync_blocking(
-                identity_path=identity_path(),
-                credentials_path=credentials_path(),
-                database_path=database_path(),
-                collections=SYNCABLE_COLLECTIONS,
-                page_size=page_size,
-                full=full,
-                on_progress=reporter,
-                warn=warn,
+            lambda: run_with_http(
+                lambda http: run_sync(
+                    identity_path=identity_path(),
+                    credentials_path=credentials_path(),
+                    database_path=database_path(),
+                    collections=SYNCABLE_COLLECTIONS,
+                    http=http,
+                    page_size=page_size,
+                    full=full,
+                    on_progress=reporter,
+                    warn=warn,
+                ),
             ),
             backoff_note="。库里没动任何东西。",
         )

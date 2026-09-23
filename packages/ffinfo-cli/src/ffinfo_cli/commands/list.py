@@ -20,13 +20,14 @@ from ffinfo.tabs import parse_tabs
 from ffinfo_cli.failures import fail_usage, guard, machine_mode, warn
 from ffinfo_cli.list import (
     completion_values,
-    list_bookmarks_blocking,
-    list_history_blocking,
-    list_tabs_blocking,
     parse_since,
+    run_bookmarks,
+    run_history,
+    run_tabs,
 )
 from ffinfo_cli.paths import credentials_path, database_path, identity_path
 from ffinfo_cli.render import render
+from ffinfo_cli.runner import run
 
 # 缺子命令走 UsageError（"Missing command."）进失败契约 —— 不能用 no_args_is_help：
 # NoArgsIsHelpError 构造时 ctx.get_help() 会把 help 打到 stdout（rich 副作用），
@@ -110,15 +111,17 @@ def history(
     _check_limit(limit)
     parsed_since = _parsed_since(since)
     report = guard(
-        lambda: list_history_blocking(
-            identity_path=identity_path(),
-            credentials_path=credentials_path(),
-            database_path=database_path(),
-            since=parsed_since,
-            domain=domain,
-            search=search,
-            limit=limit,
-            warn=warn,
+        lambda: run(
+            lambda: run_history(
+                identity_path=identity_path(),
+                credentials_path=credentials_path(),
+                database_path=database_path(),
+                since=parsed_since,
+                domain=domain,
+                search=search,
+                limit=limit,
+                warn=warn,
+            )
         )
     )
 
@@ -137,13 +140,15 @@ def bookmarks(
     """书签：保留父子层级的树；``--path`` 命中后从该文件夹重新生根。"""
     _check_limit(limit)
     report = guard(
-        lambda: list_bookmarks_blocking(
-            identity_path=identity_path(),
-            credentials_path=credentials_path(),
-            database_path=database_path(),
-            path=path,
-            limit=limit,
-            warn=warn,
+        lambda: run(
+            lambda: run_bookmarks(
+                identity_path=identity_path(),
+                credentials_path=credentials_path(),
+                database_path=database_path(),
+                path=path,
+                limit=limit,
+                warn=warn,
+            )
         )
     )
 
@@ -162,13 +167,15 @@ def tabs(
     """标签页：按设备（一台设备一条记录）分组；``--device`` 只留命中的那台。"""
     _check_limit(limit)
     report = guard(
-        lambda: list_tabs_blocking(
-            identity_path=identity_path(),
-            credentials_path=credentials_path(),
-            database_path=database_path(),
-            device=device,
-            limit=limit,
-            warn=warn,
+        lambda: run(
+            lambda: run_tabs(
+                identity_path=identity_path(),
+                credentials_path=credentials_path(),
+                database_path=database_path(),
+                device=device,
+                limit=limit,
+                warn=warn,
+            )
         )
     )
 

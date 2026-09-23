@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -218,25 +217,3 @@ def _counts(nodes: Sequence[BookmarkNode]) -> dict[str, int]:
     for node in _flatten(nodes):
         tally[node.type] = tally.get(node.type, 0) + 1
     return tally
-
-
-def list_bookmarks_blocking(
-    *,
-    identity_path: Path,
-    credentials_path: Path,
-    database_path: Path,
-    path: str | None = None,
-    limit: int | None = None,
-    warn: Callable[[str], None] | None = None,
-) -> BookmarksReport:
-    """:func:`run_bookmarks` 的同步外壳。纯本地，所以没有 HTTP 客户端要开。"""
-    return asyncio.run(
-        run_bookmarks(
-            identity_path=identity_path,
-            credentials_path=credentials_path,
-            database_path=database_path,
-            path=path,
-            warn=warn,
-            limit=limit,
-        )
-    )

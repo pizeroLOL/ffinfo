@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -144,25 +143,3 @@ def _device_matches(client: ClientTabs, device: str) -> bool:
     """``clientName``（不区分大小写）**或** ``clientId`` 精确命中。不做子串。"""
     wanted = device.strip()
     return client.client_name.casefold() == wanted.casefold() or client.client_id == wanted
-
-
-def list_tabs_blocking(
-    *,
-    identity_path: Path,
-    credentials_path: Path,
-    database_path: Path,
-    device: str | None = None,
-    limit: int | None = None,
-    warn: Callable[[str], None] | None = None,
-) -> TabsReport:
-    """:func:`run_tabs` 的同步外壳。纯本地，所以没有 HTTP 客户端要开。"""
-    return asyncio.run(
-        run_tabs(
-            identity_path=identity_path,
-            credentials_path=credentials_path,
-            database_path=database_path,
-            device=device,
-            warn=warn,
-            limit=limit,
-        )
-    )

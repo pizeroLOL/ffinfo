@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import sqlite3
 import time
 from collections.abc import Callable
@@ -28,7 +27,7 @@ from ffinfo_cli.paths import config_dir, credentials_path, data_dir, database_pa
 from ffinfo_cli.places import HostContext, discover_profiles, firefox_roots
 from ffinfo_cli.store import open_database
 
-__all__ = ["LocalPaths", "ProfilesReport", "build_report", "default_paths", "profiles_blocking"]
+__all__ = ["LocalPaths", "ProfilesReport", "build_report", "default_paths"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,21 +182,3 @@ def _notes(
     if not collections:
         notes.append("还没有同步过：先跑 `ffinfo-cli sync`。")
     return notes
-
-
-def profiles_blocking(
-    *,
-    host: HostContext,
-    paths: LocalPaths | None = None,
-    warn: Callable[[str], None] | None = None,
-    clock: Callable[[], float] = time.time,
-) -> ProfilesReport:
-    """:func:`build_report` 的同步外壳。"""
-    return asyncio.run(
-        build_report(
-            host=host,
-            paths=paths if paths is not None else default_paths(),
-            warn=warn,
-            clock=clock,
-        )
-    )

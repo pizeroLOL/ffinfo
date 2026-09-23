@@ -15,7 +15,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -47,8 +46,6 @@ __all__ = [
     "ImportInput",
     "ImportReport",
     "PortableImport",
-    "export_blocking",
-    "import_blocking",
     "run_export",
     "run_import",
 ]
@@ -277,30 +274,3 @@ async def _cloud_state(
     records = await store.load_all_records()
     cursors = await store.load_all_cursors()
     return records, cursors
-
-
-def export_blocking(
-    *,
-    database_path: Path,
-    destination: Path,
-    host: HostContext,
-    machine: str,
-    profile_path: Path | None = None,
-) -> ExportReport:
-    """:func:`run_export` 的同步外壳。"""
-    return asyncio.run(
-        run_export(
-            database_path=database_path,
-            destination=destination,
-            host=host,
-            machine=machine,
-            profile_path=profile_path,
-        )
-    )
-
-
-def import_blocking(
-    *, database_path: Path, input: ImportInput, warn: Callable[[str], None] | None = None
-) -> ImportReport:
-    """:func:`run_import` 的同步外壳。"""
-    return asyncio.run(run_import(database_path=database_path, input=input, warn=warn))

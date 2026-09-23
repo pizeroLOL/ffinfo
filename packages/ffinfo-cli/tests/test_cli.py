@@ -418,10 +418,10 @@ def test_login_without_oldsync_keys_is_auth_exit_4(monkeypatch: pytest.MonkeyPat
     """
     credentials = Credentials(access_token="ACCESS-TOKEN", scope="profile", expires_at=1_000.0)
 
-    def fake_login(**_kwargs: object) -> Credentials:
+    async def fake_login(**_kwargs: object) -> Credentials:
         return credentials
 
-    monkeypatch.setattr("ffinfo_cli.commands.login.login_sync", fake_login)
+    monkeypatch.setattr("ffinfo_cli.commands.login.run_login", fake_login)
 
     result = runner.invoke(app, ["-j", "login"])
 
@@ -489,10 +489,10 @@ def test_login_abort_is_failure_contract(monkeypatch: pytest.MonkeyPatch) -> Non
     """
     import click
 
-    def abort_login(**_kwargs: object) -> Credentials:
+    async def abort_login(**_kwargs: object) -> Credentials:
         raise click.Abort()
 
-    monkeypatch.setattr("ffinfo_cli.commands.login.login_sync", abort_login)
+    monkeypatch.setattr("ffinfo_cli.commands.login.run_login", abort_login)
 
     result = runner.invoke(app, ["-j", "login"])
 
@@ -510,10 +510,10 @@ def test_login_abort_is_human_error_line_by_default(
     """人读模式同一场景：stderr 一行 ``错误：…``，stdout 无半截成功文案。"""
     import click
 
-    def abort_login(**_kwargs: object) -> Credentials:
+    async def abort_login(**_kwargs: object) -> Credentials:
         raise click.Abort()
 
-    monkeypatch.setattr("ffinfo_cli.commands.login.login_sync", abort_login)
+    monkeypatch.setattr("ffinfo_cli.commands.login.run_login", abort_login)
 
     result = runner.invoke(app, ["login"])
 
@@ -527,10 +527,10 @@ def test_login_typer_abort_also_enters_the_contract(monkeypatch: pytest.MonkeyPa
     """``typer.prompt`` 抛的是 ``typer.Abort``（与 ``click.Abort`` 不同类）—— 同档。"""
     import typer as typer_mod
 
-    def abort_login(**_kwargs: object) -> Credentials:
+    async def abort_login(**_kwargs: object) -> Credentials:
         raise typer_mod.Abort()
 
-    monkeypatch.setattr("ffinfo_cli.commands.login.login_sync", abort_login)
+    monkeypatch.setattr("ffinfo_cli.commands.login.run_login", abort_login)
 
     result = runner.invoke(app, ["-j", "login"])
 
@@ -565,7 +565,7 @@ def test_j_list_without_subcommand_is_usage_error_json(
 
 
 def _fake_successful_login(monkeypatch: pytest.MonkeyPatch) -> None:
-    """把 ``login_sync`` 换成返回 oldsync 密钥的替身 —— 不联网、不落盘。"""
+    """把 ``run_login`` 换成返回 oldsync 密钥的替身 —— 不联网、不落盘。"""
     import base64
 
     from ffinfo.keys import OLD_SYNC_SCOPE, ScopedKey
@@ -580,10 +580,10 @@ def _fake_successful_login(monkeypatch: pytest.MonkeyPatch) -> None:
         },
     )
 
-    def fake_login(**_kwargs: object) -> Credentials:
+    async def fake_login(**_kwargs: object) -> Credentials:
         return credentials
 
-    monkeypatch.setattr("ffinfo_cli.commands.login.login_sync", fake_login)
+    monkeypatch.setattr("ffinfo_cli.commands.login.run_login", fake_login)
 
 
 def test_login_success_json_with_j(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -711,8 +711,8 @@ def test_shell_completion_of_option_values_is_silent_without_data(
     assert shell_completions("import", "--profile", incomplete="") == set()
 
 
-def _fake_sync(*, on_progress: object = None, **_kwargs: object) -> SyncReport:
-    """替身 sync_blocking：报一页进度、返回一份最小报告 —— 不联网、不读凭据。"""
+async def _fake_sync(*, on_progress: object = None, **_kwargs: object) -> SyncReport:
+    """替身 ``run_sync``：报一页进度、返回一份最小报告 —— 不联网、不读凭据。"""
     if callable(on_progress):
         on_progress(FetchProgress(collection="history", pages=1, records=3))
     return SyncReport(
@@ -749,7 +749,7 @@ def test_progress_follows_the_mode(
     argv: list[str], has_progress: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``-j`` 默认关进度（agent 的 stderr 不能混进进度行）；显式 ``--progress`` 仍开。"""
-    monkeypatch.setattr("ffinfo_cli.commands.sync.sync_blocking", _fake_sync)
+    monkeypatch.setattr("ffinfo_cli.commands.sync.run_sync", _fake_sync)
 
     result = runner.invoke(app, argv)
 
@@ -758,7 +758,7 @@ def test_progress_follows_the_mode(
 
 
 def test_sync_default_output_is_human(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("ffinfo_cli.commands.sync.sync_blocking", _fake_sync)
+    monkeypatch.setattr("ffinfo_cli.commands.sync.run_sync", _fake_sync)
 
     result = runner.invoke(app, ["sync", "--no-progress"])
 
@@ -768,7 +768,7 @@ def test_sync_default_output_is_human(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_sync_json_output_with_j(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("ffinfo_cli.commands.sync.sync_blocking", _fake_sync)
+    monkeypatch.setattr("ffinfo_cli.commands.sync.run_sync", _fake_sync)
 
     result = runner.invoke(app, ["-j", "sync", "--no-progress"])
 
@@ -778,7 +778,7 @@ def test_sync_json_output_with_j(monkeypatch: pytest.MonkeyPatch) -> None:
     assert payload["collections"][0]["collection"] == "history"
 
 
-def _fake_bookmarks(**_kwargs: object) -> BookmarksReport:
+async def _fake_bookmarks(**_kwargs: object) -> BookmarksReport:
     return BookmarksReport(
         data_type="bookmarks",
         generated_at="2026-09-13T17:30:12+00:00",
@@ -802,7 +802,7 @@ def _fake_bookmarks(**_kwargs: object) -> BookmarksReport:
     )
 
 
-def _fake_tabs(**_kwargs: object) -> TabsReport:
+async def _fake_tabs(**_kwargs: object) -> TabsReport:
     return TabsReport(
         data_type="tabs",
         generated_at="2026-09-13T17:30:12+00:00",
@@ -832,7 +832,7 @@ def _fake_tabs(**_kwargs: object) -> TabsReport:
 
 
 def test_bookmarks_default_output_is_a_tree(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("ffinfo_cli.commands.list.list_bookmarks_blocking", _fake_bookmarks)
+    monkeypatch.setattr("ffinfo_cli.commands.list.run_bookmarks", _fake_bookmarks)
 
     result = runner.invoke(app, ["list", "bookmarks"])
 
@@ -841,7 +841,7 @@ def test_bookmarks_default_output_is_a_tree(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_tabs_default_output_groups_by_device(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("ffinfo_cli.commands.list.list_tabs_blocking", _fake_tabs)
+    monkeypatch.setattr("ffinfo_cli.commands.list.run_tabs", _fake_tabs)
 
     result = runner.invoke(app, ["list", "tabs"])
 

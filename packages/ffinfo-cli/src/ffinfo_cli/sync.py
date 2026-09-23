@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -33,8 +32,6 @@ from ffinfo.storage import (
 )
 from ffinfo_cli.login import refresh_credentials
 from ffinfo_cli.store import ApplyResult, CollectionBatch, TargetCursor, open_database
-
-_HTTP_TIMEOUT_SECONDS: Final = 60.0
 
 SYNCABLE_COLLECTIONS: Final = ("history", "bookmarks", "tabs")
 """允许拉取的 collection —— **白名单，不是黑名单**（顺序就是报告与请求的顺序）。
@@ -219,36 +216,3 @@ async def run_sync(
         database=str(database_path),
         protocol={name: fetches[name].count for name in _PROTOCOL_COLLECTIONS},
     )
-
-
-def sync_blocking(
-    *,
-    identity_path: Path,
-    credentials_path: Path,
-    database_path: Path,
-    collections: Sequence[str],
-    page_size: int = 100,
-    full: bool = False,
-    on_progress: Callable[[FetchProgress], None] | None = None,
-    warn: Callable[[str], None] | None = None,
-) -> SyncReport:
-    """:func:`run_sync` 的同步外壳：自己开 HTTP 客户端。
-
-    ``on_progress`` 一路透传到 HTTP 客户端 —— 命令行那层靠它显示"拉到第几页了"。
-    """
-
-    async def _main() -> SyncReport:
-        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as http:
-            return await run_sync(
-                identity_path=identity_path,
-                credentials_path=credentials_path,
-                database_path=database_path,
-                collections=collections,
-                http=http,
-                page_size=page_size,
-                full=full,
-                on_progress=on_progress,
-                warn=warn,
-            )
-
-    return asyncio.run(_main())

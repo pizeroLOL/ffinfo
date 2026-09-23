@@ -5,9 +5,10 @@ from __future__ import annotations
 import typer
 
 from ffinfo_cli.failures import guard, machine_mode
-from ffinfo_cli.login import LoginReport, login_sync
+from ffinfo_cli.login import ConsoleCodeReceiver, LoginReport, run_login
 from ffinfo_cli.paths import credentials_path, identity_path
 from ffinfo_cli.render import render
+from ffinfo_cli.runner import LOGIN_TIMEOUT_SECONDS, run_with_http
 
 
 def _login() -> LoginReport:
@@ -16,7 +17,15 @@ def _login() -> LoginReport:
     ``sync_key_bundle()`` 缺 oldsync scope 时抛 ``AuthError``（拿不到密钥同样是认证失败）。
     漏在 ``guard`` 外面就变成 traceback + 退出码 1，把 README 那张表破掉一格。
     """
-    credentials = login_sync(identity_path=identity_path(), credentials_path=credentials_path())
+    credentials = run_with_http(
+        lambda http: run_login(
+            identity_path=identity_path(),
+            credentials_path=credentials_path(),
+            receiver=ConsoleCodeReceiver(),
+            http=http,
+        ),
+        timeout=LOGIN_TIMEOUT_SECONDS,
+    )
     bundle = credentials.sync_key_bundle()
     return LoginReport(
         credentials=str(credentials_path()),

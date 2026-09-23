@@ -40,8 +40,6 @@ from ffinfo_cli.transfer import (
     ExportReport,
     FirefoxImport,
     PortableImport,
-    export_blocking,
-    import_blocking,
     run_export,
     run_import,
 )
@@ -470,23 +468,3 @@ async def test_export_then_import_then_query(tmp_path: Path) -> None:
     stored = await store.load_firefox_visits()
     assert [item.url for item in stored] == ["https://a.example/", "https://b.example/"]
     assert stored[0].machine == "test-laptop"
-
-
-def test_blocking_wrappers_are_usable_from_sync_code(tmp_path: Path) -> None:
-    """CLI 调的是这两个同步外壳 —— 它们自己开事件循环，不能是协程。"""
-    home = tmp_path / "home"
-    profile_with_firefox(home, [("https://a.example/", "A", micros(DAY), 1)])
-
-    exported = export_blocking(
-        database_path=home / "ffinfo.sqlite",
-        destination=tmp_path / "portable.sqlite",
-        host=host(home),
-        machine="test-laptop",
-    )
-    imported = import_blocking(
-        database_path=tmp_path / "target.sqlite",
-        input=PortableImport(path=tmp_path / "portable.sqlite"),
-    )
-
-    assert exported.visits == 1
-    assert imported.visits_inserted == 1

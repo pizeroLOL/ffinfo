@@ -9,7 +9,6 @@ firefox 源是空的（目标机器没导入过）就自然降级成单源，不
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
@@ -276,29 +275,3 @@ def _sources(sync_visits: int, firefox_visits: int) -> list[SourceName]:
         ("firefox", firefox_visits),
     )
     return [name for name, count in pairs if count]
-
-
-def list_history_blocking(
-    *,
-    identity_path: Path,
-    credentials_path: Path,
-    database_path: Path,
-    since: datetime | None = None,
-    domain: str | None = None,
-    search: str | None = None,
-    limit: int | None = None,
-    warn: Callable[[str], None] | None = None,
-) -> HistoryReport:
-    """:func:`run_history` 的同步外壳。纯本地，所以没有 HTTP 客户端要开。"""
-    return asyncio.run(
-        run_history(
-            identity_path=identity_path,
-            credentials_path=credentials_path,
-            database_path=database_path,
-            since=since,
-            domain=domain,
-            search=search,
-            warn=warn,
-            limit=limit,
-        )
-    )

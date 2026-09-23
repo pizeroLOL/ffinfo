@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -29,6 +28,7 @@ from urllib.parse import urlsplit
 from ffinfo.crypto import EncryptedPayload, KeyBundle
 from ffinfo.errors import ConfigurationError, DecryptionError
 from ffinfo.keys import CollectionKeys
+from ffinfo_cli.runner import run
 from ffinfo_cli.store import Store, StoredVisit, open_database
 from ffinfo_cli.sync import load_credentials
 
@@ -183,8 +183,8 @@ def completion_values(
     try:
         if not database_path.is_file():
             return []
-        records, key = asyncio.run(
-            _completion_records(
+        records, key = run(
+            lambda: _completion_records(
                 database_path=database_path,
                 identity_path=identity_path,
                 credentials_path=credentials_path,

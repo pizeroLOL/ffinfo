@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 import webbrowser
 from pathlib import Path
@@ -28,8 +27,6 @@ from ffinfo.oauth import (
     firefox_redirect_uri,
     parse_callback_url,
 )
-
-_HTTP_TIMEOUT_SECONDS: float = 30.0
 
 
 class LoginReport(BaseModel):
@@ -105,21 +102,6 @@ async def run_login(
     )
     CredentialStore(identity=identity, path=credentials_path).save(credentials.to_json())
     return credentials
-
-
-def login_sync(*, identity_path: Path, credentials_path: Path) -> Credentials:
-    """:func:`run_login` 的同步外壳：自己开 HTTP 客户端、用控制台接收授权码。"""
-
-    async def _main() -> Credentials:
-        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as http:
-            return await run_login(
-                identity_path=identity_path,
-                credentials_path=credentials_path,
-                receiver=ConsoleCodeReceiver(),
-                http=http,
-            )
-
-    return asyncio.run(_main())
 
 
 async def refresh_credentials(

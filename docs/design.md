@@ -559,7 +559,8 @@ cd application-services && git sparse-checkout set components/places components/
 同一路数：提示进报告，CLI 顺手回显 stderr。
 
 **删掉的**：`list --data-type`；`run_list(data_type=…)` / `list_blocking(data_type=…)` 这个字符串
-dispatcher（改为 `run_history` / `run_bookmarks` / `run_tabs` 与对应 `list_*_blocking`）；
+dispatcher（改为 `run_history` / `run_bookmarks` / `run_tabs` —— 一个类型一个 async 入口，
+同步外壳统一走 `ffinfo_cli/runner.py` 的共享 runner，见 §9.4）；
 `DATA_TYPES` 常量；bookmarks / tabs 上 `--domain` / `--since` / `--search` 的代码路径与测试。
 `store.load_records(collection)` 不动 —— 它本来就按 collection 字符串取，三种类型各传自己的名字。
 
@@ -679,6 +680,11 @@ Typer 的 app 定义即 surface。
   各自 `typer.Typer()` 子 app + 自己的补全回调。
 - 失败 helper（`_guard` / `_fail` / `_fail_usage` / `error_payload` / `_emit_error` / `_warn`）
   挪进 `ffinfo_cli/failures.py` —— 断掉 `cli` ↔ `commands` 的环。
+- 命令调业务入口时经 `ffinfo_cli/runner.py` 的**共享 runner**（2026-09-23 收口）：
+  每个操作只留一份带注入的 async interface（`run_*` / `build_report`），八个手写
+  `*_blocking` / `login_sync` 薄包装删掉；`asyncio.run` 与 `httpx.AsyncClient`
+  的开闭（含 `sync` 60s / `login` 30s 超时）只在 runner 里，`sync` / `login` 的
+  真实生命周期走同一个 `run_with_http`。
 - `cli.py` 只做装配（root app、callback、`add_typer`）+ entry point；
   `[project.scripts]` 的 `ffinfo_cli.cli:app` 不变。
 - 选 `commands/` 而非 `cli/` 包，是为了避开与顶层逻辑 module（`sync.py` / `login.py` /

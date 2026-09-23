@@ -14,12 +14,13 @@ from ffinfo_cli.failures import fail_usage, guard, machine_mode, warn
 from ffinfo_cli.paths import database_path
 from ffinfo_cli.places import HostContext, discover_profiles
 from ffinfo_cli.render import render
+from ffinfo_cli.runner import run
 from ffinfo_cli.transfer import (
     FirefoxImport,
     ImportInput,
     PortableImport,
-    export_blocking,
-    import_blocking,
+    run_export,
+    run_import,
 )
 
 _DESTINATION: Final = typer.Argument(..., help="便携文件写到哪（.sqlite）")
@@ -60,12 +61,14 @@ def export(
     会连 ``places.sqlite-wal`` 一起带走 —— 只拷主文件会静默丢掉最近的记录。
     """
     report = guard(
-        lambda: export_blocking(
-            database_path=database_path(),
-            destination=destination,
-            host=_host(),
-            machine=socket.gethostname(),
-            profile_path=profile,
+        lambda: run(
+            lambda: run_export(
+                database_path=database_path(),
+                destination=destination,
+                host=_host(),
+                machine=socket.gethostname(),
+                profile_path=profile,
+            )
         )
     )
 
@@ -102,7 +105,9 @@ def import_command(
         import_input = PortableImport(path=source)
 
     report = guard(
-        lambda: import_blocking(database_path=database_path(), input=import_input, warn=warn)
+        lambda: run(
+            lambda: run_import(database_path=database_path(), input=import_input, warn=warn)
+        )
     )
 
     typer.echo(render(report, machine=machine_mode()))
